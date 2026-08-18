@@ -1,0 +1,66 @@
+{
+  "Melanoma": {
+    "description": "Melanoma is the most dangerous form of skin cancer, arising from the uncontrolled growth of melanocytes — the pigment-producing cells of the skin. It can develop from an existing mole or appear as a new lesion, and has a high potential for metastasis if not detected and treated early. Prolonged UV exposure is the primary risk factor.",
+    "symptoms": ["Asymmetric shape", "Irregular borders", "Color changes", "Diameter >6mm", "Evolving spot"],
+    "recommendations": ["Urgent consultation with a dermatologist", "Skin biopsy for confirmation", "Avoid further sun exposure"],
+    "dos": ["Wear high SPF sunscreen", "Monitor all skin spots regularily", "Seek early medical advice"],
+    "donts": ["Do not ignore growing moles", "Do not try to remove the spot at home"]
+  },
+  "Basal Cell Carcinoma": {
+    "description": "Basal Cell Carcinoma (BCC) is the most common type of skin cancer, originating in the basal cells of the epidermis. It typically grows slowly and rarely spreads to other parts of the body, but can cause significant local tissue damage if left untreated. Chronic UV radiation exposure is the leading cause.",
+    "symptoms": ["Pearly or waxy bump", "Flat, flesh-colored scar-like lesion", "Bleeding or scabbing sore that heals and returns"],
+    "recommendations": ["Surgical excision", "Topical treatments", "Regular skin checks"],
+    "dos": ["Stay in the shade", "Wear protective clothing", "Check for new growths"],
+    "donts": ["Do not skip follow-up appointments", "Do not ignore non-healing sores"]
+  },
+  "Eczema": {
+    "description": "Eczema (Atopic Dermatitis) is a chronic inflammatory skin condition characterized by dry, itchy, and inflamed skin. It is commonly triggered by environmental allergens, stress, or genetic factors. While it is not contagious, it significantly affects quality of life and often requires long-term management.",
+    "symptoms": ["Dry, itchy skin", "Red to brownish-gray patches", "Small, raised bumps that may leak fluid"],
+    "recommendations": ["Hydrate the skin regularly", "Use mild soaps", "Identify and avoid triggers"],
+    "dos": ["Apply moisturizer after bathing", "Wear breathable cotton clothing"],
+    "donts": ["Do not scratch the affected area", "Avoid harsh detergents"]
+  },
+  "Psoriasis": {
+    "description": "Psoriasis is a chronic autoimmune condition that causes the rapid build-up of skin cells, leading to scaling on the skin's surface. Inflammation and redness around the scales are typical. It is not contagious and ranges from mild to severe. Stress, infections, and certain medications can trigger flare-ups.",
+    "symptoms": ["Red patches of skin covered with thick, silvery scales", "Small scaling spots", "Dry, cracked skin that may bleed"],
+    "recommendations": ["Moisturize the skin", "Topical corticosteroids", "Light therapy (UVB)"],
+    "dos": ["Manage stress", "Keep skin clean", "Follow medical advice for triggers"],
+    "donts": ["Do not pick at the scales", "Avoid smoking and excessive alcohol"]
+  },
+  "Nevi": {
+    "description": "Nevi (commonly known as moles) are benign growths on the skin formed by clusters of melanocytes. They can appear anywhere on the body and are usually harmless. However, atypical or dysplastic nevi carry a slightly elevated risk of developing into melanoma and should be monitored regularly using the ABCDE criteria.",
+    "symptoms": ["Common mole", "Uniformly tan, brown, or black", "Defined border", "Oval or circular shape"],
+    "recommendations": ["Regular self-examination", "Protect from sun exposure", "Consult if changes occur"],
+    "dos": ["Monitor for changes using ABCDE rule", "Apply broad-spectrum sunscreen"],
+    "donts": ["Do not ignore sudden changes in shape or color"]
+  },
+  "Vascular": {
+    "description": "Vascular lesions are abnormalities of the blood vessels that appear on or beneath the skin surface. This category includes conditions such as cherry angiomas, telangiectasias (spider veins), and port-wine stains. Most are benign, but some may indicate underlying systemic conditions and warrant clinical evaluation.",
+    "symptoms": ["Red, blue, or violet skin marks", "Visible blood vessels (telangiectasia)", "Small red dots (cherry angiomas)"],
+    "recommendations": ["Laser therapy", "Surgical removal if symptomatic", "Annual check-up"],
+    "dos": ["Avoid extreme temperature changes", "Use gentle skincare products"],
+    "donts": ["Do not scrub the area aggressively"]
+  },
+  "Actinic Keratoses": {
+    "description": "Actinic Keratosis (AK) is a pre-cancerous skin condition caused by years of cumulative sun exposure. It manifests as a rough, scaly patch on sun-damaged skin and is considered a precursor to Squamous Cell Carcinoma if left untreated. Early treatment is highly effective and prevents malignant transformation.",
+    "symptoms": ["Rough, scaly patch on sun-damaged skin", "Gritty feel like sandpaper", "Can be skin-colored, reddish, or brownish"],
+    "recommendations": ["Surgical removal or freezing", "Topical creams (fluorouracil)", "Regular skin screening"],
+    "dos": ["Apply broad-spectrum sunscreen", "Wear wide-brimmed hats"],
+    "donts": ["Do not ignore rough patches", "Do not sunbathe or use tanning beds"]
+  },
+  "Benign Keratosis": {
+    "description": "Benign Keratosis (Seborrheic Keratosis) is a non-cancerous skin growth that commonly appears in older adults. These growths originate from keratinocytes and have a characteristic 'stuck-on' or waxy appearance. They are entirely harmless but may occasionally be mistaken for melanoma, making clinical evaluation important.",
+    "symptoms": ["Waxy or wart-like growth", "Brown, black, or tan color", "Often appears 'pasted' on skin surface"],
+    "recommendations": ["Excision if irritated", "Cryotherapy", "Clinical assessment for confirmation"],
+    "dos": ["Monitor for changes in size or color", "Seek diagnosis for any new lesions"],
+    "donts": ["Do not attempt to scratch off", "Do not ignore rapid growth"]
+  },
+  "Dermatofibroma": {
+    "description": "Dermatofibroma is a common benign skin nodule composed of fibrous tissue, typically found on the lower legs. It is harmless and usually requires no treatment. The lesion often results from a minor injury such as an insect bite or a small wound. A characteristic clinical sign is its tendency to dimple inward when pinched.",
+    "symptoms": ["Small, firm, non-cancerous bump", "Typically brownish or reddish tint", "Often found on the legs", "Dims inward when pinched"],
+    "recommendations": ["No treatment usually required", "Excision for discomfort or cosmetic reasons", "Clinical monitoring"],
+    "dos": ["Note any changes in size", "Keep the area clean"],
+    "donts": ["Do not try to squeeze or remove yourself"]
+  }
+}
+

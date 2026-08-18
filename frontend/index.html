@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SkinSense AI | Professional Dermatological Analysis</title>
+    <link rel="stylesheet" href="css/style_v2.css?v=2">
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+</head>
+<body>
+
+    <!-- Formal Landing Page -->
+    <section id="landingPage" class="entry-view">
+        <div class="entry-container">
+            <div class="logo-large">Skin<span>Sense</span> AI</div>
+            <p class="entry-subtitle">Professional Dermatological Analysis System</p>
+            
+            <div id="entryAuth">
+                <h2 id="entryTitle">Login to System</h2>
+                <form id="entryAuthForm">
+                    <div class="form-group">
+                        <label>Authorized Username</label>
+                        <input type="text" id="entryUsername" required placeholder="Enter username">
+                        <small class="form-hint" id="entryUserHint" style="display: none;">Use alphabetic characters only</small>
+                    </div>
+                    <div class="form-group">
+                        <label>Secure Password</label>
+                        <input type="password" id="entryPassword" required placeholder="Enter password">
+                        <small class="form-hint" id="entryPassHint" style="display: none;">Must include lowercase, number, and special character</small>
+                    </div>
+                    <button type="submit" id="entryAuthSubmit" class="btn-process">Sign In</button>
+                </form>
+                <p id="entryToggleAuth">New user? <a href="javascript:void(0)" onclick="toggleAuthMode()">Request Access / Register</a></p>
+            </div>
+        </div>
+    </section>
+
+    <!-- Main Clinical Dashboard -->
+    <div id="mainDashboard" class="hidden app-wrapper">
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <div class="logo">Skin<span>Sense</span> AI</div>
+            </div>
+            <nav class="sidebar-nav">
+                <a href="javascript:void(0)" onclick="showSection('dashboard')" id="nav-dashboard" class="active">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+                    Dashboard
+                </a>
+                <a href="javascript:void(0)" onclick="showSection('progress')" id="nav-progress">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+                    Progress Tracker
+                </a>
+                <a href="javascript:void(0)" onclick="showSection('clinics')" id="nav-clinics">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+                    Clinic Finder
+                </a>
+                <a href="javascript:void(0)" onclick="showSection('advice')" id="nav-advice">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                    Skin Profile
+                </a>
+                <a href="javascript:void(0)" onclick="showSection('glossary')" id="nav-glossary">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+                    Glossary
+                </a>
+            </nav>
+            <div class="sidebar-footer">
+                <button id="themeToggleBtn" class="btn-theme-toggle" style="margin-bottom: 0.75rem;">
+                    <!-- Sun SVG icon for Light Theme -->
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" id="themeIconSun" class="hidden"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+                    <!-- Moon SVG icon for Dark Theme -->
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" id="themeIconMoon"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+                    <span id="themeToggleText">Sterile Light</span>
+                </button>
+                <button onclick="logout()" class="btn-logout">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+                    Logout
+                </button>
+            </div>
+        </aside>
+
+        <main class="main-content">
+            <!-- Dashboard Section -->
+            <section id="section-dashboard" class="content-section">
+                <header>
+                    <div class="hero-content">
+                        <h1>Clinical <span>Diagnostic</span> Portal</h1>
+                        <p>Upload dermatoscopic imagery for high-accuracy ensemble analysis.</p>
+                    </div>
+                </header>
+
+                <div id="quickClinicCard" class="card hidden" style="margin-bottom: 2rem; border-left: 4px solid var(--secondary);">
+                    <div style="display: flex; align-items: center; gap: 1rem;">
+                        <div class="card-icon" style="margin-bottom: 0; background: rgba(16, 185, 129, 0.1); color: var(--secondary);">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+                        </div>
+                        <div>
+                            <h4 style="color: var(--secondary);">Nearby Care Recommendation</h4>
+                            <p id="nearestClinicText" style="font-size: 0.9rem; color: var(--text-dim);">Detecting nearest clinic...</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="dashboard-grid">
+                    <div class="upload-section">
+                        <div class="card" style="height: 100%; display: flex; flex-direction: column; justify-content: space-between; margin-bottom: 0;">
+                            <div>
+                                <h2>Image Submission</h2>
+                                <p>Provide a clear, high-resolution skin lesion image.</p>
+                            </div>
+                            <div class="drop-zone" id="dropZone">
+                                <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: #64748b;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                                <p>Click to select or drag image here</p>
+                                <input type="file" id="fileInput" hidden accept="image/*">
+                            </div>
+                            <div id="imagePreviewContainer" style="display: none;">
+                                <img id="imagePreview" src="" alt="Clinical Preview">
+                                <button id="analyzeBtn" class="btn-process">Execute Analysis</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- ABCDE Checklist Section Card -->
+                    <div class="card abcde-card" style="margin-bottom: 0;">
+                        <div>
+                            <h2>ABCDE Risk Checklist</h2>
+                            <p>Assess clinical signs of potential malignancy before/after imaging.</p>
+                        </div>
+                        
+                        <div class="abcde-checklist">
+                            <!-- A -->
+                            <label class="abcde-item">
+                                <div class="abcde-checkbox-container">
+                                    <input type="checkbox" class="abcde-checkbox" data-criteria="A">
+                                </div>
+                                <div class="abcde-text">
+                                    <strong>A - Asymmetry</strong>
+                                    <span>One half of the mole does not match the other half.</span>
+                                </div>
+                            </label>
+                            
+                            <!-- B -->
+                            <label class="abcde-item">
+                                <div class="abcde-checkbox-container">
+                                    <input type="checkbox" class="abcde-checkbox" data-criteria="B">
+                                </div>
+                                <div class="abcde-text">
+                                    <strong>B - Border</strong>
+                                    <span>Edges are irregular, ragged, notched, or poorly defined.</span>
+                                </div>
+                            </label>
+                            
+                            <!-- C -->
+                            <label class="abcde-item">
+                                <div class="abcde-checkbox-container">
+                                    <input type="checkbox" class="abcde-checkbox" data-criteria="C">
+                                </div>
+                                <div class="abcde-text">
+                                    <strong>C - Color</strong>
+                                    <span>Color is uneven; may have patches of pink, red, white, or blue.</span>
+                                </div>
+                            </label>
+                            
+                            <!-- D -->
+                            <label class="abcde-item">
+                                <div class="abcde-checkbox-container">
+                                    <input type="checkbox" class="abcde-checkbox" data-criteria="D">
+                                </div>
+                                <div class="abcde-text">
+                                    <strong>D - Diameter</strong>
+                                    <span>The spot is larger than 6 millimeters across (pencil eraser size).</span>
+                                </div>
+                            </label>
+                            
+                            <!-- E -->
+                            <label class="abcde-item">
+                                <div class="abcde-checkbox-container">
+                                    <input type="checkbox" class="abcde-checkbox" data-criteria="E">
+                                </div>
+                                <div class="abcde-text">
+                                    <strong>E - Evolving</strong>
+                                    <span>The mole is changing size, shape, color, or causing bleeding/itching.</span>
+                                </div>
+                            </label>
+                        </div>
+
+                        <!-- Real-time dynamic risk gauge indicator -->
+                        <div class="risk-gauge-container">
+                            <div class="risk-gauge-header">
+                                <span class="risk-gauge-title">Clinical Risk Score</span>
+                                <span class="risk-badge low" id="abcdeRiskBadge">Low Risk</span>
+                            </div>
+                            <div class="risk-bar">
+                                <div class="risk-bar-fill" id="abcdeRiskBarFill"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="result-section" id="results" style="display: none;">
+                    <div class="result-grid">
+                        <div class="result-card main-result">
+                            <div class="result-header">
+                                <h3>Diagnostic Report</h3>
+                                <button class="btn-secondary" id="nextAnalysisBtn">New Analysis</button>
+                            </div>
+                            <div class="prediction-value" id="predictionText">Processing...</div>
+                            <div class="confidence-container">
+                                <div class="confidence-bar">
+                                    <div class="confidence-fill" id="confidenceFill"></div>
+                                </div>
+                                <span id="confidenceText">0.0% Confidence</span>
+                            </div>
+                        </div>
+
+                        <div class="card description-card">
+                            <h4>Disease Overview</h4>
+                            <p id="descriptionText" class="description-text"></p>
+                        </div>
+
+                        <div class="card rag-card">
+                            <h4>Clinical Symptoms</h4>
+                            <ul id="symptomsList"></ul>
+                        </div>
+                        <div class="card rag-card">
+                            <h4>Recommended Protocol</h4>
+                            <ul id="recommendationsList"></ul>
+                        </div>
+                        <div class="action-card">
+                            <div class="card rag-card dos">
+                                <h4>Do's</h4>
+                                <ul id="dosList"></ul>
+                            </div>
+                            <div class="card rag-card donts">
+                                <h4>Don'ts</h4>
+                                <ul id="dontsList"></ul>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Progress Tracker Section -->
+            <section id="section-progress" class="content-section hidden">
+                <div class="section-header">
+                    <h2>Progress Tracker</h2>
+                    <p>Monitor your skin health over time with visual history.</p>
+                </div>
+                <div class="card">
+                    <div id="progressTimeline" class="progress-timeline">
+                        <!-- History with images will be injected here -->
+                    </div>
+                </div>
+            </section>
+
+            <!-- Clinic Finder Section -->
+            <section id="section-clinics" class="content-section hidden">
+                <div class="section-header">
+                    <h2>Nearby Dermatologists</h2>
+                    <p>Find professional care in your current vicinity or search by city.</p>
+                </div>
+
+                <div class="card" style="margin-bottom: 1.5rem; display: flex; gap: 1rem; align-items: center;">
+                    <input type="text" id="manualLocationInput" placeholder="Enter city or area (e.g. Chennai, London)" style="flex: 1; padding: 0.8rem; border-radius: 8px; border: 1px solid var(--border); background: rgba(0,0,0,0.2); color: white;">
+                    <button onclick="searchManualLocation()" class="btn-process" style="width: auto; padding: 0.8rem 1.5rem;">Search Location</button>
+                    <button onclick="initMap()" class="btn-secondary" style="width: auto; padding: 0.8rem 1.5rem;">Use My Location</button>
+                </div>
+
+                <div class="card map-container-card">
+                    <div id="map" style="height: 500px; width: 100%; border-radius: 12px;"></div>
+                    <div id="clinicList" class="clinic-list">
+                        <p class="placeholder-text">Searching for clinics...</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Personalized Advice Section -->
+            <section id="section-advice" class="content-section hidden">
+                <div class="section-header">
+                    <h2>Skin Profile & Advice</h2>
+                    <p>Get personalized recommendations based on your unique skin and environment.</p>
+                </div>
+                
+                <div class="advice-grid">
+                    <!-- Weather Advice Card -->
+                    <div class="card weather-card">
+                        <div class="card-icon">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v2"/><path d="M12 20v2"/><path d="M4.93 4.93l1.41 1.41"/><path d="M17.66 17.66l1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="M6.34 17.66l-1.41 1.41"/><path d="M19.07 4.93l-1.41 1.41"/><circle cx="12" cy="12" r="5"/></svg>
+                        </div>
+                        <h3>Weather Advice</h3>
+                        <div id="weatherContent">
+                            <p>Detecting location...</p>
+                        </div>
+                    </div>
+
+                    <!-- Skin Type Card -->
+                    <div class="card skin-type-card">
+                        <div class="card-icon">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                        </div>
+                        <h3>Skin Type</h3>
+                        <div id="skinTypeDisplay">
+                            <p id="currentSkinTypeText" style="margin-bottom: 1rem;">Not selected yet.</p>
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label>Select your Skin Type:</label>
+                                <select id="skinTypeSelect" onchange="updateSkinType(this.value)">
+                                    <option value="">Choose...</option>
+                                    <option value="Oily">Oily</option>
+                                    <option value="Dry">Dry</option>
+                                    <option value="Combination">Combination</option>
+                                    <option value="Sensitive">Sensitive</option>
+                                    <option value="Normal">Normal</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Allergies & Triggers Card -->
+                    <div class="card allergy-card">
+                        <div class="card-icon">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                        </div>
+                        <h3>Potential Triggers</h3>
+                        <div id="triggerContent">
+                            <form id="triggerForm">
+                                <div class="form-group">
+                                    <label>Food Habits (Select all that apply)</label>
+                                    <div class="checkbox-grid" id="foodHabitsGrid">
+                                        <label><input type="checkbox" value="Spicy foods"> Spicy foods</label>
+                                        <label><input type="checkbox" value="Oily / fried foods"> Oily / fried foods</label>
+                                        <label><input type="checkbox" value="Junk / fast food"> Junk / fast food</label>
+                                        <label><input type="checkbox" value="Sugary foods"> Sugary foods (sweets, chocolates)</label>
+                                        <label><input type="checkbox" value="Dairy products"> Dairy products (milk, cheese, butter)</label>
+                                        <label><input type="checkbox" value="Seafood"> Seafood (fish, prawns)</label>
+                                        <label><input type="checkbox" value="Eggs"> Eggs</label>
+                                        <label><input type="checkbox" value="Nuts"> Nuts (peanuts, cashews, almonds)</label>
+                                        <label><input type="checkbox" value="Gluten-based foods"> Gluten-based foods (wheat, bread)</label>
+                                        <label><input type="checkbox" value="Processed foods"> Processed / packaged foods</label>
+                                        <label><input type="checkbox" value="High salt intake"> High salt intake</label>
+                                        <label><input type="checkbox" value="Coffee consumption"> Coffee consumption</label>
+                                        <label><input type="checkbox" value="Soft drinks"> Soft drinks / carbonated beverages</label>
+                                        <label><input type="checkbox" value="Low water intake"> Low water intake</label>
+                                        <label><input type="checkbox" value="Frequent outside food"> Frequent outside food</label>
+                                    </div>
+                                </div>
+                                <div class="form-group">
+                                    <label>Skincare / Product Usage (Select all that apply)</label>
+                                    <div class="checkbox-grid" id="productsUsedGrid">
+                                        <label><input type="checkbox" value="Face wash"> Face wash (regular use)</label>
+                                        <label><input type="checkbox" value="Soap"> Soap (body/face)</label>
+                                        <label><input type="checkbox" value="Moisturizer"> Moisturizer</label>
+                                        <label><input type="checkbox" value="Sunscreen"> Sunscreen</label>
+                                        <label><input type="checkbox" value="Toner"> Toner</label>
+                                        <label><input type="checkbox" value="Serum"> Serum</label>
+                                        <label><input type="checkbox" value="Acne creams"> Acne creams / medicated ointments</label>
+                                        <label><input type="checkbox" value="Makeup"> Makeup (foundation, compact, etc.)</label>
+                                        <label><input type="checkbox" value="Makeup remover"> Makeup remover</label>
+                                        <label><input type="checkbox" value="Shampoo"> Shampoo</label>
+                                        <label><input type="checkbox" value="Conditioner"> Conditioner</label>
+                                        <label><input type="checkbox" value="Hair oil"> Hair oil</label>
+                                        <label><input type="checkbox" value="Body lotion"> Body lotion</label>
+                                        <label><input type="checkbox" value="Perfume"> Perfume / deodorant</label>
+                                        <label><input type="checkbox" value="Recently changed skincare products"> Recently changed skincare products</label>
+                                    </div>
+                                </div>
+                                <button type="submit" class="btn-process">Update Habits</button>
+                            </form>
+                            <div id="triggerSuggestions" class="trigger-suggestions"></div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Glossary Section -->
+            <section id="section-glossary" class="content-section hidden">
+                <div class="card">
+                    <h2 style="margin-bottom: 1.5rem; color: #1e3a8a;">Disease Glossary</h2>
+                    <p style="color: var(--text-dim); margin-bottom: 2rem;">Overview of dermatological conditions currently supported by the AI model.</p>
+                    <div id="glossaryGrid" class="glossary-grid"></div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- Skin Type Quiz Modal -->
+    <div id="quizModal" class="modal hidden">
+        <div class="modal-content">
+            <h2>Skin Type Detection Quiz</h2>
+            <div id="quizQuestion">
+                <!-- Question will be injected here -->
+            </div>
+            <div class="modal-footer">
+                <button id="quizNextBtn" class="btn-process">Next</button>
+            </div>
+        </div>
+    </div>
+
+        <footer id="appFooter">
+            <p>&copy; 2026 SkinSense AI Clinical Systems. All rights reserved.</p>
+        </footer>
+    </div>
+
+    <!-- Chat Widget -->
+    <div id="chatWidget" class="chat-widget hidden">
+        <div class="chat-header">
+            <h4>Clinical AI Assistant</h4>
+            <button onclick="toggleChat()" class="btn-close">&times;</button>
+        </div>
+        <div id="chatMessages" class="chat-messages">
+            <div class="message ai-message">Hello. I am the SkinSense AI clinical assistant. How can I help you regarding dermatological conditions today?</div>
+        </div>
+        <div class="chat-input-area">
+            <input type="text" id="chatInput" placeholder="Ask a medical question...">
+            <button id="sendChatBtn" class="btn-primary">Send</button>
+        </div>
+    </div>
+    
+    <button id="openChatBtn" class="chat-fab hidden" onclick="toggleChat()">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+    </button>
+
+    <!-- Leaflet Maps (Free & Inbuilt Alternative) -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="js/app_v2.js?v=2"></script>
+</body>
+</html>
