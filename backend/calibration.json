@@ -1,0 +1,11 @@
+{
+  "temperature": 0.6879,
+  "melanoma_threshold": 0.1027,
+  "min_confidence": 0.35,
+  "source": "fitted on validation split by evaluate.py on 2026-11-04T13:06:20",
+  "metrics": {
+    "test_balanced_accuracy": 0.7268,
+    "test_melanoma_sensitivity": 0.9081,
+    "test_melanoma_specificity": 0.7293
+  }
+}
