@@ -11,7 +11,7 @@ from typing import Optional
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from fastapi.staticfiles import StaticFiles
 from jose import JWTError, jwt
@@ -22,8 +22,11 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 import settings
-from database import History, User, get_db, init_db
-from inference import decide, predict_probs, preprocess
+from database import AuditLog, History, Lesion, Review, Share, User, get_db, init_db
+from inference import decide, predict_probs, preprocess, referral
+from quality import assess_quality
+import storage
+from care import BODY_SITES, build_router, scan_dict
 from rag import SkinSenseRAG
 from security import RateLimiter
 
@@ -264,37 +267,21 @@ def _iso_utc(ts):
 def get_history(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     rows = (db.query(History).filter(History.user_id == current_user.id)
             .order_by(History.timestamp.desc()).all())
-    return [{
-        "id": h.id,
-        "prediction": h.prediction,
-        "confidence": h.confidence,
-        "timestamp": _iso_utc(h.timestamp),
-        "image_url": f"/history/{h.id}/image" if h.image_path else None,
-    } for h in rows]
-
-
-def _upload_path(name: str) -> Optional[Path]:
-    path = (settings.UPLOADS_DIR / name).resolve()
-    return path if path.parent == settings.UPLOADS_DIR.resolve() else None
+    return [scan_dict(db, h) for h in rows]
 
 
 @app.get("/history/{history_id}/image")
 def history_image(history_id: int, current_user: User = Depends(get_current_user),
                   db: Session = Depends(get_db)):
     row = db.query(History).filter(History.id == history_id, History.user_id == current_user.id).first()
-    path = _upload_path(row.image_path) if row and row.image_path else None
-    if path is None or not path.exists():
+    data = storage.read(row.image_path) if row and row.image_path else None
+    if data is None:
         raise HTTPException(404, "Image not found")
-    return FileResponse(path, headers={"Cache-Control": "private, max-age=3600"})
+    return Response(content=data, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=3600"})
 
 
 def _delete_image(name):
-    path = _upload_path(name) if name else None
-    if path and path.exists():
-        try:
-            path.unlink()
-        except OSError:
-            logger.warning("Could not delete %s", path)
+    storage.delete(name, "cam")
 
 
 @app.delete("/history/{history_id}")
@@ -317,6 +304,11 @@ def delete_account(password: str = Form(...), current_user: User = Depends(get_c
         raise HTTPException(401, "Incorrect password")
     for row in current_user.history:
         _delete_image(row.image_path)
+    uid = current_user.id
+    db.query(Share).filter((Share.patient_id == uid) | (Share.clinician_id == uid)).delete(synchronize_session=False)
+    db.query(AuditLog).filter((AuditLog.patient_id == uid) | (AuditLog.actor_id == uid)).delete(synchronize_session=False)
+    db.query(Review).filter(Review.clinician_id == uid).delete(synchronize_session=False)
+    db.expire_all()
     db.delete(current_user)
     db.commit()
     return {"message": "Account and all stored data deleted"}
@@ -333,6 +325,7 @@ class ProfileUpdate(BaseModel):
 def get_profile(current_user: User = Depends(get_current_user)):
     return {
         "username": current_user.username,
+        "role": current_user.role or "patient",
         "skin_type": current_user.skin_type,
         "food_habits": current_user.food_habits,
         "products_used": current_user.products_used,
@@ -392,19 +385,36 @@ def _read_image(file: UploadFile) -> Image.Image:
 
 
 def _store_image(image: Image.Image) -> str:
-    name = f"{uuid.uuid4().hex}.jpg"
     stored = image.copy()
     stored.thumbnail((settings.STORED_IMAGE_MAX_SIDE, settings.STORED_IMAGE_MAX_SIDE))
-    stored.save(settings.UPLOADS_DIR / name, "JPEG", quality=92)
-    return name
+    buffer = io.BytesIO()
+    stored.save(buffer, "JPEG", quality=92)          # re-encoding drops EXIF/GPS metadata
+    return storage.save(buffer.getvalue())            # encrypted before it reaches the disk
+
+
+@app.post("/quality")
+def check_quality(file: UploadFile = File(...), current_user: User = Depends(get_current_user)):
+    """Instant photo-quality feedback before running the analysis (no model involved)."""
+    return assess_quality(_read_image(file))
 
 
 # Plain `def` (not `async def`): FastAPI runs it in a worker thread, so heavy
 # CPU-bound inference no longer blocks the event loop for other requests.
 @app.post("/predict")
-def predict(file: UploadFile = File(...), current_user: User = Depends(get_current_user),
-            db: Session = Depends(get_db)):
+def predict(file: UploadFile = File(...), lesion_id: Optional[int] = Form(None),
+            age: Optional[int] = Form(None), sex: Optional[str] = Form(None), site: Optional[str] = Form(None),
+            current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if lesion_id is not None and not db.query(Lesion).filter(
+            Lesion.id == lesion_id, Lesion.user_id == current_user.id).first():
+        raise HTTPException(404, "Lesion not found")
+    if age is not None and not 0 <= age <= 120:
+        raise HTTPException(400, "Age must be between 0 and 120")
+    if sex not in (None, "", "male", "female"):
+        raise HTTPException(400, "Sex must be 'male' or 'female'")
+    if site not in (None, "") and site not in BODY_SITES:
+        raise HTTPException(400, "Unknown body site")
     image = _read_image(file)
+    quality = assess_quality(image)
 
     try:
         model = model_store.get()
@@ -418,7 +428,9 @@ def predict(file: UploadFile = File(...), current_user: User = Depends(get_curre
         info = UNCERTAIN_INFO if result["class_name"] is None else rag.retrieve_info(result["class_name"])
         image_name = _store_image(image)
         db.add(History(prediction=result["prediction"], confidence=result["confidence"],
-                       image_path=image_name, user_id=current_user.id))
+                       melanoma_prob=result["melanoma_probability"], image_path=image_name,
+                       user_id=current_user.id, lesion_id=lesion_id,
+                       age=age, sex=sex or None, site=site or None))
         db.commit()
     except Exception:
         logger.exception("Prediction failed")
@@ -438,8 +450,13 @@ def predict(file: UploadFile = File(...), current_user: User = Depends(get_curre
         "recommendations": info["recommendations"],
         "dos": info["dos"],
         "donts": info["donts"],
+        "referral": referral(result, quality),
+        "quality": quality,
         "disclaimer": DISCLAIMER,
     }
+
+
+app.include_router(build_router(get_current_user))
 
 
 @app.exception_handler(Exception)

@@ -1,3 +1,4 @@
+import io
 import os
 from pathlib import Path
 
@@ -98,12 +99,18 @@ def test_upload_validation(client, make_user, monkeypatch):
     assert upload(client, h, data=image_bytes(size=(400, 400))).status_code == 413
 
 
-def test_stored_image_has_no_exif_and_is_a_jpeg(client, make_user):
+def test_stored_image_is_encrypted_has_no_exif_and_is_a_jpeg(client, make_user):
+    import storage
     _, h = make_user()
     assert upload(client, h, data=image_bytes("JPEG", exif=True)).status_code == 200
-    files = list(Path(os.environ["SKINSENSE_UPLOADS"]).glob("*.jpg"))
+    files = sorted(Path(os.environ["SKINSENSE_UPLOADS"]).glob("*.enc"), key=lambda p: p.stat().st_mtime)
     assert files
-    with Image.open(files[-1]) as img:
+    raw = files[-1].read_bytes()
+    jpeg_magic = bytes([0xFF, 0xD8])
+    assert not raw.startswith(jpeg_magic), "the file on disk must not be a readable JPEG"
+    decrypted = storage.read(files[-1].name)
+    assert decrypted.startswith(jpeg_magic)
+    with Image.open(io.BytesIO(decrypted)) as img:
         assert img.format == "JPEG" and not img.getexif()
 
 
@@ -119,7 +126,7 @@ def test_images_are_private_to_their_owner(client, make_user):
     assert client.get(item["image_url"], headers=bob).status_code == 404
     assert client.get(item["image_url"]).status_code == 401
     # the old public /uploads mount is gone
-    stored = next(Path(os.environ["SKINSENSE_UPLOADS"]).glob("*.jpg")).name
+    stored = next(Path(os.environ["SKINSENSE_UPLOADS"]).glob("*.enc")).name
     assert client.get(f"/uploads/{stored}").status_code == 404
     assert client.delete(f"/history/{item['id']}", headers=bob).status_code == 404
 
@@ -127,10 +134,10 @@ def test_images_are_private_to_their_owner(client, make_user):
 def test_delete_history_item_removes_row_and_file(client, make_user):
     _, h = make_user()
     uploads = Path(os.environ["SKINSENSE_UPLOADS"])
-    before = set(uploads.glob("*.jpg"))
+    before = set(uploads.glob("*.enc"))
     upload(client, h)
     item = client.get("/history", headers=h).json()[0]
-    (path,) = set(uploads.glob("*.jpg")) - before      # exactly the file this upload created
+    (path,) = set(uploads.glob("*.enc")) - before      # exactly the file this upload created
     assert path.exists()
     assert client.delete(f"/history/{item['id']}", headers=h).status_code == 200
     assert client.get("/history", headers=h).json() == []
@@ -141,10 +148,10 @@ def test_delete_account_erases_everything(client, make_user):
     name, h = make_user()
     upload(client, h)
     uploads = Path(os.environ["SKINSENSE_UPLOADS"])
-    before = set(uploads.glob("*.jpg"))
+    before = set(uploads.glob("*.enc"))
     assert client.request("DELETE", "/account", headers=h, data={"password": "wrong"}).status_code == 401
     assert client.request("DELETE", "/account", headers=h, data={"password": "Passw0rd!x"}).status_code == 200
-    assert len(set(uploads.glob("*.jpg"))) == len(before) - 1
+    assert len(set(uploads.glob("*.enc"))) == len(before) - 1
     assert client.post("/login", data={"username": name, "password": "Passw0rd!x"}).status_code == 401
 
 

@@ -86,3 +86,39 @@ def decide(probs, class_names, cfg, melanoma="Melanoma",
             "prediction": class_names[top_idx],
             "class_name": class_names[top_idx],
             "confidence": round(top_conf * 100, 1)}
+
+
+# ---------------------------------------------------------------------------
+# Referral guidance: what the person should DO, in plain language
+# ---------------------------------------------------------------------------
+STANDING_ADVICE = ("This tool can miss skin cancers. If a spot is new, changing, growing, bleeding, itching or "
+                   "simply worries you, see a doctor whatever this result says.")
+
+
+def referral(result, quality=None):
+    """Turn a decision (from `decide`) into a referral level. Deliberately conservative:
+    anything suggestive of melanoma or basal cell carcinoma is 'priority'."""
+    cls = result.get("class_name")
+    if result.get("escalated") or cls in ("Melanoma", "Basal Cell Carcinoma"):
+        out = {"level": "priority", "title": "See a dermatologist promptly",
+               "timeframe": "Within 1-2 weeks",
+               "message": "This photo has features the model associates with a skin cancer. That is not a diagnosis, "
+                          "but it is worth having examined by a dermatologist soon."}
+    elif cls == "Actinic Keratoses":
+        out = {"level": "soon", "title": "Book a dermatology review",
+               "timeframe": "Within a few weeks",
+               "message": "This resembles a sun-damage spot that can occasionally progress. A doctor should look at it."}
+    elif result.get("uncertain") or cls is None:
+        out = {"level": "inconclusive", "title": "Result not reliable",
+               "timeframe": "Retake the photo",
+               "message": "The model could not read this photo with confidence. Retake it in good light, or see a "
+                          "doctor if you are concerned."}
+    else:
+        out = {"level": "routine", "title": "Likely harmless - keep an eye on it",
+               "timeframe": "Re-check in about 3 months",
+               "message": "This resembles a common non-cancerous spot. Photograph it again in a few months and see a "
+                          "doctor if it changes in size, shape or colour."}
+    if quality is not None and not quality.get("ok", True) and out["level"] in ("routine", "inconclusive"):
+        out["message"] += " The photo quality is poor, so retaking it would give a more reliable result."
+    out["advice"] = STANDING_ADVICE
+    return out
