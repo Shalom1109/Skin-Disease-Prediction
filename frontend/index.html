@@ -1,426 +1,469 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="light">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SkinSense AI | Professional Dermatological Analysis</title>
-    <link rel="stylesheet" href="css/style_v2.css?v=2">
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>SkinSense AI - Skin Lesion Screening</title>
+    <meta name="description" content="Educational skin-lesion screening with a three-model deep-learning ensemble. Not a medical device.">
+    <meta name="theme-color" content="#0b63ce">
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230b63ce'/%3E%3Cpath d='M16 8v16M8 16h16' stroke='white' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E">
+    <script>
+        // Apply the saved theme before first paint (no light/dark flash).
+        try { document.documentElement.dataset.theme = localStorage.getItem('theme') ||
+              (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'); } catch (e) {}
+    </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+    <link rel="stylesheet" href="css/app.css?v=3">
 </head>
 <body>
 
-    <!-- Formal Landing Page -->
-    <section id="landingPage" class="entry-view">
-        <div class="entry-container">
-            <div class="logo-large">Skin<span>Sense</span> AI</div>
-            <p class="entry-subtitle">Professional Dermatological Analysis System</p>
-            
-            <div id="entryAuth">
-                <h2 id="entryTitle">Login to System</h2>
-                <form id="entryAuthForm">
-                    <div class="form-group">
-                        <label>Authorized Username</label>
-                        <input type="text" id="entryUsername" required placeholder="Enter username">
-                        <small class="form-hint" id="entryUserHint" style="display: none;">Use alphabetic characters only</small>
-                    </div>
-                    <div class="form-group">
-                        <label>Secure Password</label>
-                        <input type="password" id="entryPassword" required placeholder="Enter password">
-                        <small class="form-hint" id="entryPassHint" style="display: none;">Must include lowercase, number, and special character</small>
-                    </div>
-                    <button type="submit" id="entryAuthSubmit" class="btn-process">Sign In</button>
-                </form>
-                <p id="entryToggleAuth">New user? <a href="javascript:void(0)" onclick="toggleAuthMode()">Request Access / Register</a></p>
+<!-- Icon sprite -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <symbol id="i-logo" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/></symbol>
+    <symbol id="i-activity" viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></symbol>
+    <symbol id="i-pin" viewBox="0 0 24 24"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></symbol>
+    <symbol id="i-user" viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></symbol>
+    <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></symbol>
+    <symbol id="i-logout" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></symbol>
+    <symbol id="i-alert" viewBox="0 0 24 24"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></symbol>
+    <symbol id="i-x-circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></symbol>
+    <symbol id="i-message" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></symbol>
+    <symbol id="i-send" viewBox="0 0 24 24"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></symbol>
+    <symbol id="i-menu" viewBox="0 0 24 24"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></symbol>
+    <symbol id="i-eye" viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></symbol>
+    <symbol id="i-printer" viewBox="0 0 24 24"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></symbol>
+    <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></symbol>
+    <symbol id="i-locate" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="8"/><line x1="12" y1="1" x2="12" y2="4"/><line x1="12" y1="20" x2="12" y2="23"/><line x1="1" y1="12" x2="4" y2="12"/><line x1="20" y1="12" x2="23" y2="12"/></symbol>
+    <symbol id="i-camera" viewBox="0 0 24 24"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></symbol>
+    <symbol id="i-upload" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></symbol>
+    <symbol id="i-lock" viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></symbol>
+    <symbol id="i-layers" viewBox="0 0 24 24"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></symbol>
+    <symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></symbol>
+    <symbol id="i-file" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></symbol>
+</svg>
+
+<!-- =====================================================================
+     LANDING / SIGN-IN
+     ===================================================================== -->
+<section id="landingPage" class="landing">
+    <div class="landing-hero">
+        <div class="brand">
+            <span class="brand-mark"><svg class="i i-lg"><use href="#i-logo"/></svg></span>
+            <span>SkinSense AI<small>Skin lesion screening</small></span>
+        </div>
+
+        <div>
+            <h1>Understand a skin change, <em>then see a specialist.</em></h1>
+            <p class="lede" style="margin-top:1rem">
+                Upload a photo of a skin lesion and get an AI second look from a three-model ensemble, with plain-language
+                information and guidance on when to seek care. Built as an educational screening aid.
+            </p>
+        </div>
+
+        <div class="feature-list">
+            <div class="feature">
+                <span class="card-icon"><svg class="i"><use href="#i-layers"/></svg></span>
+                <div><h3>Three-model ensemble</h3><p>ConvNeXt, ViT and MaxViT combine local detail and global context across seven lesion categories.</p></div>
+            </div>
+            <div class="feature">
+                <span class="card-icon"><svg class="i"><use href="#i-lock"/></svg></span>
+                <div><h3>Private by design</h3><p>Photos are stored only under your account, never shown to others, and you can delete them at any time.</p></div>
+            </div>
+            <div class="feature">
+                <span class="card-icon"><svg class="i"><use href="#i-pin"/></svg></span>
+                <div><h3>Guidance, not a verdict</h3><p>Every result comes with next steps and a dermatologist finder. It never replaces a clinical exam.</p></div>
             </div>
         </div>
-    </section>
 
-    <!-- Main Clinical Dashboard -->
-    <div id="mainDashboard" class="hidden app-wrapper">
-        <aside class="sidebar">
-            <div class="sidebar-header">
-                <div class="logo">Skin<span>Sense</span> AI</div>
+        <div class="stat-row">
+            <div><strong>7</strong><span>lesion categories</span></div>
+            <div><strong>3</strong><span>deep-learning models</span></div>
+            <div><strong>10k+</strong><span>training images (HAM10000)</span></div>
+        </div>
+    </div>
+
+    <div class="landing-auth">
+        <div class="card auth-card">
+            <h2 id="entryTitle">Welcome back</h2>
+            <p class="muted" id="entrySubtitle">Sign in to analyse images and view your history.</p>
+
+            <div class="tabs" role="tablist" aria-label="Account">
+                <button class="tab" role="tab" id="authTabLogin" aria-selected="true" type="button">Sign in</button>
+                <button class="tab" role="tab" id="authTabRegister" aria-selected="false" type="button">Create account</button>
             </div>
-            <nav class="sidebar-nav">
-                <a href="javascript:void(0)" onclick="showSection('dashboard')" id="nav-dashboard" class="active">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
-                    Dashboard
-                </a>
-                <a href="javascript:void(0)" onclick="showSection('progress')" id="nav-progress">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
-                    Progress Tracker
-                </a>
-                <a href="javascript:void(0)" onclick="showSection('clinics')" id="nav-clinics">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
-                    Clinic Finder
-                </a>
-                <a href="javascript:void(0)" onclick="showSection('advice')" id="nav-advice">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-                    Skin Profile
-                </a>
-                <a href="javascript:void(0)" onclick="showSection('glossary')" id="nav-glossary">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
-                    Glossary
-                </a>
-            </nav>
-            <div class="sidebar-footer">
-                <button id="themeToggleBtn" class="btn-theme-toggle" style="margin-bottom: 0.75rem;">
-                    <!-- Sun SVG icon for Light Theme -->
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" id="themeIconSun" class="hidden"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
-                    <!-- Moon SVG icon for Dark Theme -->
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" id="themeIconMoon"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
-                    <span id="themeToggleText">Sterile Light</span>
-                </button>
-                <button onclick="logout()" class="btn-logout">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
-                    Logout
-                </button>
-            </div>
-        </aside>
+
+            <form id="authForm" data-mode="login" novalidate>
+                <div id="authError" class="form-error hidden" role="alert"></div>
+                <div class="field">
+                    <label for="entryUsername">Username</label>
+                    <input class="input" id="entryUsername" autocomplete="username" required placeholder="e.g. jane_doe">
+                    <span class="help register-only">3-32 characters: letters, numbers or underscores.</span>
+                </div>
+                <div class="field">
+                    <label for="entryPassword">Password</label>
+                    <div class="input-wrap">
+                        <input class="input" id="entryPassword" type="password" autocomplete="current-password" required placeholder="Your password">
+                        <button type="button" class="btn btn-ghost btn-icon reveal" id="togglePassword" aria-label="Show password"><svg class="i"><use href="#i-eye"/></svg></button>
+                    </div>
+                    <span class="help register-only">At least 8 characters with a lowercase letter, a number and a special character.</span>
+                </div>
+                <button type="submit" id="entryAuthSubmit" class="btn btn-primary btn-block">Sign in</button>
+            </form>
+
+            <p class="fine" style="margin-top:1.25rem">
+                SkinSense AI is an educational screening aid, <strong>not</strong> a medical device or a diagnosis.
+                Uploaded photos are stored privately under your account and can be deleted at any time.
+            </p>
+        </div>
+    </div>
+</section>
+
+<!-- =====================================================================
+     APPLICATION
+     ===================================================================== -->
+<div id="mainDashboard" class="app hidden">
+    <aside class="sidebar" id="sidebar" aria-label="Main navigation">
+        <div class="brand">
+            <span class="brand-mark"><svg class="i i-lg"><use href="#i-logo"/></svg></span>
+            <span>SkinSense AI<small>Screening portal</small></span>
+        </div>
+
+        <nav class="nav">
+            <div class="nav-label">Workspace</div>
+            <a href="#dashboard" id="nav-dashboard" class="active" onclick="showSection('dashboard'); return false;"><svg class="i"><use href="#i-grid"/></svg>Analysis</a>
+            <a href="#progress" id="nav-progress" onclick="showSection('progress'); return false;"><svg class="i"><use href="#i-activity"/></svg>History</a>
+            <a href="#clinics" id="nav-clinics" onclick="showSection('clinics'); return false;"><svg class="i"><use href="#i-pin"/></svg>Find a dermatologist</a>
+            <div class="nav-label">Personal</div>
+            <a href="#advice" id="nav-advice" onclick="showSection('advice'); return false;"><svg class="i"><use href="#i-user"/></svg>Skin profile</a>
+        </nav>
+
+        <div class="sidebar-spacer"></div>
+
+        <div class="user-actions">
+            <button class="btn btn-ghost" id="themeToggleBtn" type="button">
+                <svg class="i" id="themeIconSun"><use href="#i-sun"/></svg>
+                <svg class="i hidden" id="themeIconMoon"><use href="#i-moon"/></svg>
+                <span id="themeToggleText">Dark mode</span>
+            </button>
+            <button class="btn btn-danger-ghost" id="deleteDataBtn" type="button" title="Permanently delete your account, scans and stored images">
+                <svg class="i"><use href="#i-trash"/></svg>Delete my data
+            </button>
+        </div>
+        <div class="user-card">
+            <span class="avatar" id="userAvatar">U</span>
+            <div style="min-width:0;flex:1"><strong id="userName">Signed in</strong><span>Private workspace</span></div>
+            <button class="btn btn-ghost btn-icon" id="logoutBtn" type="button" aria-label="Sign out" title="Sign out"><svg class="i"><use href="#i-logout"/></svg></button>
+        </div>
+    </aside>
+
+    <div class="shell">
+        <header class="topbar">
+            <button class="btn btn-secondary btn-icon menu-btn" id="menuBtn" type="button" aria-label="Open menu" aria-controls="sidebar"><svg class="i"><use href="#i-menu"/></svg></button>
+            <h2 id="pageTitle">Analysis</h2>
+            <span class="spacer"></span>
+            <span class="badge" data-tone="medium" title="This tool is an educational aid, not a diagnosis">Educational use only</span>
+        </header>
 
         <main class="main-content">
-            <!-- Dashboard Section -->
-            <section id="section-dashboard" class="content-section">
-                <header>
-                    <div class="hero-content">
-                        <h1>Clinical <span>Diagnostic</span> Portal</h1>
-                        <p>Upload dermatoscopic imagery for high-accuracy ensemble analysis.</p>
-                    </div>
-                </header>
+            <div class="callout warn notice" role="note">
+                <svg class="i"><use href="#i-info"/></svg>
+                <div><strong>Not a diagnosis.</strong> Results are an AI screening aid trained on dermoscopic images. Always have a
+                    skin change that is new, growing, bleeding or itching checked by a qualified dermatologist.</div>
+            </div>
 
-                <div id="quickClinicCard" class="card hidden" style="margin-bottom: 2rem; border-left: 4px solid var(--secondary);">
-                    <div style="display: flex; align-items: center; gap: 1rem;">
-                        <div class="card-icon" style="margin-bottom: 0; background: rgba(16, 185, 129, 0.1); color: var(--secondary);">
-                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
-                        </div>
-                        <div>
-                            <h4 style="color: var(--secondary);">Nearby Care Recommendation</h4>
-                            <p id="nearestClinicText" style="font-size: 0.9rem; color: var(--text-dim);">Detecting nearest clinic...</p>
-                        </div>
-                    </div>
+            <!-- ============ ANALYSIS ============ -->
+            <section id="section-dashboard" class="content-section">
+                <div class="page-head">
+                    <h1>Skin lesion analysis</h1>
+                    <p>Upload a clear photo of the area of concern. The model returns probabilities for seven lesion categories along with next-step guidance.</p>
+                </div>
+
+                <div class="kpis">
+                    <div class="card kpi"><span class="card-icon"><svg class="i i-lg"><use href="#i-layers"/></svg></span><div><strong id="kpiScans">0</strong><span>Scans in your history</span></div></div>
+                    <div class="card kpi"><span class="card-icon"><svg class="i i-lg"><use href="#i-clock"/></svg></span><div><strong id="kpiLast">-</strong><span>Last scan</span></div></div>
+                    <div class="card kpi"><span class="card-icon"><svg class="i i-lg"><use href="#i-check"/></svg></span><div><strong id="kpiResult">-</strong><span>Most recent result</span></div></div>
                 </div>
 
                 <div class="dashboard-grid">
-                    <div class="upload-section">
-                        <div class="card" style="height: 100%; display: flex; flex-direction: column; justify-content: space-between; margin-bottom: 0;">
+                    <div class="card">
+                        <div class="steps" aria-label="Progress">
+                            <div class="step now" id="stepUpload"><b>1</b>Upload</div>
+                            <div class="step" id="stepAnalyze"><b>2</b>Analyse</div>
+                            <div class="step" id="stepReview"><b>3</b>Review</div>
+                        </div>
+
+                        <div id="uploadBox">
+                            <div class="drop-zone" id="dropZone" role="button" tabindex="0" aria-label="Choose or drop an image">
+                                <span class="card-icon"><svg class="i i-lg"><use href="#i-upload"/></svg></span>
+                                <strong>Drop an image here, or click to browse</strong>
+                                <span class="fine">JPEG, PNG or WebP, up to 8 MB</span>
+                                <input type="file" id="fileInput" hidden accept="image/jpeg,image/png,image/webp">
+                            </div>
+                            <ul class="tips" aria-label="Photo tips">
+                                <li><svg class="i"><use href="#i-check"/></svg>Bright, even, natural light</li>
+                                <li><svg class="i"><use href="#i-check"/></svg>Sharp focus, no filters</li>
+                                <li><svg class="i"><use href="#i-check"/></svg>Lesion fills most of the frame</li>
+                                <li><svg class="i"><use href="#i-check"/></svg>Hair or glare kept off the spot</li>
+                            </ul>
+                        </div>
+
+                        <div id="imagePreviewContainer" class="preview hidden">
+                            <div class="preview-frame"><img id="imagePreview" alt="Selected lesion preview"></div>
+                            <div class="preview-meta">
+                                <span class="name" id="fileName">image.jpg</span>
+                                <span class="fine" id="fileSize"></span>
+                            </div>
+                            <div class="preview-actions">
+                                <button class="btn btn-primary" id="analyzeBtn" type="button"><svg class="i"><use href="#i-activity"/></svg>Analyse image</button>
+                                <button class="btn btn-secondary" id="removeFileBtn" type="button">Choose another</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <div class="card-head">
                             <div>
-                                <h2>Image Submission</h2>
-                                <p>Provide a clear, high-resolution skin lesion image.</p>
-                            </div>
-                            <div class="drop-zone" id="dropZone">
-                                <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: #64748b;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-                                <p>Click to select or drag image here</p>
-                                <input type="file" id="fileInput" hidden accept="image/*">
-                            </div>
-                            <div id="imagePreviewContainer" style="display: none;">
-                                <img id="imagePreview" src="" alt="Clinical Preview">
-                                <button id="analyzeBtn" class="btn-process">Execute Analysis</button>
+                                <h2>ABCDE self-check</h2>
+                                <p>Tick any warning signs you notice. This is independent of the AI result.</p>
                             </div>
                         </div>
-                    </div>
-
-                    <!-- ABCDE Checklist Section Card -->
-                    <div class="card abcde-card" style="margin-bottom: 0;">
-                        <div>
-                            <h2>ABCDE Risk Checklist</h2>
-                            <p>Assess clinical signs of potential malignancy before/after imaging.</p>
+                        <div class="abcde-list">
+                            <label class="abcde-item"><input type="checkbox" class="abcde-checkbox" data-criteria="A"><div><strong>A - Asymmetry</strong><span>One half does not match the other half.</span></div></label>
+                            <label class="abcde-item"><input type="checkbox" class="abcde-checkbox" data-criteria="B"><div><strong>B - Border</strong><span>Edges are irregular, ragged or poorly defined.</span></div></label>
+                            <label class="abcde-item"><input type="checkbox" class="abcde-checkbox" data-criteria="C"><div><strong>C - Colour</strong><span>Uneven colour, with brown, black, pink, white or blue areas.</span></div></label>
+                            <label class="abcde-item"><input type="checkbox" class="abcde-checkbox" data-criteria="D"><div><strong>D - Diameter</strong><span>Wider than about 6 mm (a pencil eraser).</span></div></label>
+                            <label class="abcde-item"><input type="checkbox" class="abcde-checkbox" data-criteria="E"><div><strong>E - Evolving</strong><span>Changing in size, shape or colour, or bleeding/itching.</span></div></label>
                         </div>
-                        
-                        <div class="abcde-checklist">
-                            <!-- A -->
-                            <label class="abcde-item">
-                                <div class="abcde-checkbox-container">
-                                    <input type="checkbox" class="abcde-checkbox" data-criteria="A">
-                                </div>
-                                <div class="abcde-text">
-                                    <strong>A - Asymmetry</strong>
-                                    <span>One half of the mole does not match the other half.</span>
-                                </div>
-                            </label>
-                            
-                            <!-- B -->
-                            <label class="abcde-item">
-                                <div class="abcde-checkbox-container">
-                                    <input type="checkbox" class="abcde-checkbox" data-criteria="B">
-                                </div>
-                                <div class="abcde-text">
-                                    <strong>B - Border</strong>
-                                    <span>Edges are irregular, ragged, notched, or poorly defined.</span>
-                                </div>
-                            </label>
-                            
-                            <!-- C -->
-                            <label class="abcde-item">
-                                <div class="abcde-checkbox-container">
-                                    <input type="checkbox" class="abcde-checkbox" data-criteria="C">
-                                </div>
-                                <div class="abcde-text">
-                                    <strong>C - Color</strong>
-                                    <span>Color is uneven; may have patches of pink, red, white, or blue.</span>
-                                </div>
-                            </label>
-                            
-                            <!-- D -->
-                            <label class="abcde-item">
-                                <div class="abcde-checkbox-container">
-                                    <input type="checkbox" class="abcde-checkbox" data-criteria="D">
-                                </div>
-                                <div class="abcde-text">
-                                    <strong>D - Diameter</strong>
-                                    <span>The spot is larger than 6 millimeters across (pencil eraser size).</span>
-                                </div>
-                            </label>
-                            
-                            <!-- E -->
-                            <label class="abcde-item">
-                                <div class="abcde-checkbox-container">
-                                    <input type="checkbox" class="abcde-checkbox" data-criteria="E">
-                                </div>
-                                <div class="abcde-text">
-                                    <strong>E - Evolving</strong>
-                                    <span>The mole is changing size, shape, color, or causing bleeding/itching.</span>
-                                </div>
-                            </label>
-                        </div>
-
-                        <!-- Real-time dynamic risk gauge indicator -->
-                        <div class="risk-gauge-container">
-                            <div class="risk-gauge-header">
-                                <span class="risk-gauge-title">Clinical Risk Score</span>
-                                <span class="risk-badge low" id="abcdeRiskBadge">Low Risk</span>
-                            </div>
-                            <div class="risk-bar">
-                                <div class="risk-bar-fill" id="abcdeRiskBarFill"></div>
-                            </div>
+                        <div class="risk-gauge">
+                            <div class="risk-gauge-head"><span>Warning signs</span><span class="badge" data-tone="low" id="abcdeRiskBadge">Low</span></div>
+                            <div class="meter" data-tone="low" id="abcdeMeter"><span id="abcdeRiskBarFill"></span></div>
                         </div>
                     </div>
                 </div>
 
-                <div class="result-section" id="results" style="display: none;">
-                    <div class="result-grid">
-                        <div class="result-card main-result">
-                            <div class="result-header">
-                                <h3>Diagnostic Report</h3>
-                                <button class="btn-secondary" id="nextAnalysisBtn">New Analysis</button>
+                <!-- ---- Results ---- -->
+                <div class="results hidden" id="results" aria-live="polite">
+                    <div class="card result-hero" id="resultCard" data-tone="neutral">
+                        <img id="resultImage" alt="Analysed lesion">
+                        <div class="result-main">
+                            <span class="eyebrow">Screening result</span>
+                            <div class="result-title">
+                                <h2 id="predictionText">-</h2>
+                                <span class="badge" id="resultBadge">-</span>
                             </div>
-                            <div class="prediction-value" id="predictionText">Processing...</div>
-                            <div class="confidence-container">
-                                <div class="confidence-bar">
-                                    <div class="confidence-fill" id="confidenceFill"></div>
-                                </div>
-                                <span id="confidenceText">0.0% Confidence</span>
+                            <div class="conf-row" data-tone="neutral" id="confRow">
+                                <div class="meta"><span id="confidenceLabel">Model confidence</span><span id="confidenceText">0%</span></div>
+                                <div class="meter"><span id="confidenceFill"></span></div>
                             </div>
-                        </div>
-
-                        <div class="card description-card">
-                            <h4>Disease Overview</h4>
-                            <p id="descriptionText" class="description-text"></p>
-                        </div>
-
-                        <div class="card rag-card">
-                            <h4>Clinical Symptoms</h4>
-                            <ul id="symptomsList"></ul>
-                        </div>
-                        <div class="card rag-card">
-                            <h4>Recommended Protocol</h4>
-                            <ul id="recommendationsList"></ul>
-                        </div>
-                        <div class="action-card">
-                            <div class="card rag-card dos">
-                                <h4>Do's</h4>
-                                <ul id="dosList"></ul>
-                            </div>
-                            <div class="card rag-card donts">
-                                <h4>Don'ts</h4>
-                                <ul id="dontsList"></ul>
+                            <div class="callout warn hidden" id="resultNote"><svg class="i"><use href="#i-alert"/></svg><div id="resultNoteText"></div></div>
+                            <div class="result-actions">
+                                <button class="btn btn-secondary btn-sm" id="nextAnalysisBtn" type="button">New analysis</button>
+                                <button class="btn btn-secondary btn-sm" id="printBtn" type="button"><svg class="i"><use href="#i-printer"/></svg>Print report</button>
                             </div>
                         </div>
                     </div>
+
+                    <div class="result-cols">
+                        <div class="card">
+                            <h3>Category probabilities</h3>
+                            <div class="prob-list" id="probabilityList"></div>
+                            <p class="fine" style="margin-top:1rem">Probabilities are calibrated model outputs, not the chance that you have a condition.</p>
+                        </div>
+                        <div class="card">
+                            <h3>Overview</h3>
+                            <p class="muted" id="descriptionText"></p>
+                        </div>
+                        <div class="card"><h3>Typical signs</h3><ul class="info-list" id="symptomsList"></ul></div>
+                        <div class="card"><h3>Recommended next steps</h3><ul class="info-list" id="recommendationsList"></ul></div>
+                        <div class="card"><h3>Do</h3><ul class="info-list do-list" id="dosList"></ul></div>
+                        <div class="card"><h3>Don't</h3><ul class="info-list dont-list" id="dontsList"></ul></div>
+
+                        <div class="card care-card span-2">
+                            <div class="card-head">
+                                <div class="title-row">
+                                    <span class="card-icon"><svg class="i i-lg"><use href="#i-pin"/></svg></span>
+                                    <div><h3>Find care near you</h3><p>Look up a nearby dermatologist. Your location is only used when you press the button.</p></div>
+                                </div>
+                            </div>
+                            <div class="care-row">
+                                <button class="btn btn-primary" id="nearbyBtn" type="button"><svg class="i"><use href="#i-locate"/></svg>Use my location</button>
+                                <input class="input" id="nearbyCity" placeholder="...or enter a city" aria-label="City">
+                                <button class="btn btn-secondary" id="nearbyCityBtn" type="button"><svg class="i"><use href="#i-search"/></svg>Search</button>
+                            </div>
+                            <div class="care-out" id="nearbyOut"></div>
+                        </div>
+                    </div>
+                    <p class="fine" id="resultDisclaimer"></p>
                 </div>
             </section>
 
-            <!-- Progress Tracker Section -->
+            <!-- ============ HISTORY ============ -->
             <section id="section-progress" class="content-section hidden">
-                <div class="section-header">
-                    <h2>Progress Tracker</h2>
-                    <p>Monitor your skin health over time with visual history.</p>
+                <div class="page-head">
+                    <h1>Scan history</h1>
+                    <p>Your previous analyses, stored privately. Comparing photos over time can help you notice changes to discuss with a doctor.</p>
                 </div>
-                <div class="card">
-                    <div id="progressTimeline" class="progress-timeline">
-                        <!-- History with images will be injected here -->
-                    </div>
-                </div>
+                <div id="progressTimeline" class="timeline"></div>
             </section>
 
-            <!-- Clinic Finder Section -->
+            <!-- ============ CLINICS ============ -->
             <section id="section-clinics" class="content-section hidden">
-                <div class="section-header">
-                    <h2>Nearby Dermatologists</h2>
-                    <p>Find professional care in your current vicinity or search by city.</p>
+                <div class="page-head">
+                    <h1>Find a dermatologist</h1>
+                    <p>Search by city or area, or use your current location. Listings come from OpenStreetMap and may be incomplete, so confirm details with the clinic.</p>
                 </div>
-
-                <div class="card" style="margin-bottom: 1.5rem; display: flex; gap: 1rem; align-items: center;">
-                    <input type="text" id="manualLocationInput" placeholder="Enter city or area (e.g. Chennai, London)" style="flex: 1; padding: 0.8rem; border-radius: 8px; border: 1px solid var(--border); background: rgba(0,0,0,0.2); color: white;">
-                    <button onclick="searchManualLocation()" class="btn-process" style="width: auto; padding: 0.8rem 1.5rem;">Search Location</button>
-                    <button onclick="initMap()" class="btn-secondary" style="width: auto; padding: 0.8rem 1.5rem;">Use My Location</button>
+                <div class="card search-bar">
+                    <input class="input" id="manualLocationInput" placeholder="City or area, e.g. Chennai" aria-label="City or area">
+                    <button class="btn btn-primary" id="searchLocationBtn" type="button"><svg class="i"><use href="#i-search"/></svg>Search</button>
+                    <button class="btn btn-secondary" id="myLocationBtn" type="button"><svg class="i"><use href="#i-locate"/></svg>Use my location</button>
                 </div>
-
-                <div class="card map-container-card">
-                    <div id="map" style="height: 500px; width: 100%; border-radius: 12px;"></div>
-                    <div id="clinicList" class="clinic-list">
-                        <p class="placeholder-text">Searching for clinics...</p>
-                    </div>
+                <div class="map-layout">
+                    <div id="map" role="region" aria-label="Map of nearby clinics"></div>
+                    <div id="clinicList" class="clinic-list"><div class="state-msg">Search for a place to see nearby dermatology clinics.</div></div>
                 </div>
             </section>
 
-            <!-- Personalized Advice Section -->
+            <!-- ============ PROFILE ============ -->
             <section id="section-advice" class="content-section hidden">
-                <div class="section-header">
-                    <h2>Skin Profile & Advice</h2>
-                    <p>Get personalized recommendations based on your unique skin and environment.</p>
+                <div class="page-head">
+                    <h1>Skin profile</h1>
+                    <p>Optional details that personalise the general skin-care tips on this page. They are not used by the AI model.</p>
                 </div>
-                
-                <div class="advice-grid">
-                    <!-- Weather Advice Card -->
-                    <div class="card weather-card">
-                        <div class="card-icon">
-                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v2"/><path d="M12 20v2"/><path d="M4.93 4.93l1.41 1.41"/><path d="M17.66 17.66l1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="M6.34 17.66l-1.41 1.41"/><path d="M19.07 4.93l-1.41 1.41"/><circle cx="12" cy="12" r="5"/></svg>
+                <div class="profile-grid">
+                    <div class="card">
+                        <div class="card-head">
+                            <div class="title-row"><span class="card-icon"><svg class="i i-lg"><use href="#i-sun"/></svg></span><div><h3>Weather advice</h3><p>Based on current local conditions.</p></div></div>
                         </div>
-                        <h3>Weather Advice</h3>
-                        <div id="weatherContent">
-                            <p>Detecting location...</p>
+                        <div id="weatherContent"><p class="muted">Share your location to see skin-care tips for today's weather.</p></div>
+                        <button class="btn btn-secondary btn-sm" id="weatherBtn" type="button" style="margin-top:1rem"><svg class="i"><use href="#i-locate"/></svg>Get local weather</button>
+                    </div>
+
+                    <div class="card">
+                        <div class="card-head">
+                            <div class="title-row"><span class="card-icon"><svg class="i i-lg"><use href="#i-user"/></svg></span><div><h3>Skin type</h3><p>Choose the option that fits you best.</p></div></div>
+                        </div>
+                        <div id="currentSkinTypeText"><p class="muted">Not selected yet.</p></div>
+                        <div class="field" style="margin:1rem 0 0">
+                            <label for="skinTypeSelect">Skin type</label>
+                            <select class="input" id="skinTypeSelect">
+                                <option value="">Choose...</option>
+                                <option value="Oily">Oily</option><option value="Dry">Dry</option><option value="Combination">Combination</option>
+                                <option value="Sensitive">Sensitive</option><option value="Normal">Normal</option>
+                            </select>
                         </div>
                     </div>
 
-                    <!-- Skin Type Card -->
-                    <div class="card skin-type-card">
-                        <div class="card-icon">
-                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                    <div class="card span-2">
+                        <div class="card-head">
+                            <div class="title-row"><span class="card-icon"><svg class="i i-lg"><use href="#i-alert"/></svg></span><div><h3>Potential triggers</h3><p>Select what applies to you to get general lifestyle tips.</p></div></div>
                         </div>
-                        <h3>Skin Type</h3>
-                        <div id="skinTypeDisplay">
-                            <p id="currentSkinTypeText" style="margin-bottom: 1rem;">Not selected yet.</p>
-                            <div class="form-group" style="margin-bottom: 0;">
-                                <label>Select your Skin Type:</label>
-                                <select id="skinTypeSelect" onchange="updateSkinType(this.value)">
-                                    <option value="">Choose...</option>
-                                    <option value="Oily">Oily</option>
-                                    <option value="Dry">Dry</option>
-                                    <option value="Combination">Combination</option>
-                                    <option value="Sensitive">Sensitive</option>
-                                    <option value="Normal">Normal</option>
-                                </select>
+                        <form id="triggerForm">
+                            <div class="field">
+                                <span class="label">Food habits</span>
+                                <div class="check-grid" id="foodHabitsGrid">
+                                    <label class="check"><input type="checkbox" value="Spicy foods"> Spicy foods</label>
+                                    <label class="check"><input type="checkbox" value="Oily / fried foods"> Oily / fried foods</label>
+                                    <label class="check"><input type="checkbox" value="Junk / fast food"> Junk / fast food</label>
+                                    <label class="check"><input type="checkbox" value="Sugary foods"> Sugary foods</label>
+                                    <label class="check"><input type="checkbox" value="Dairy products"> Dairy products</label>
+                                    <label class="check"><input type="checkbox" value="Seafood"> Seafood</label>
+                                    <label class="check"><input type="checkbox" value="Eggs"> Eggs</label>
+                                    <label class="check"><input type="checkbox" value="Nuts"> Nuts</label>
+                                    <label class="check"><input type="checkbox" value="Gluten-based foods"> Gluten-based foods</label>
+                                    <label class="check"><input type="checkbox" value="Processed foods"> Processed / packaged foods</label>
+                                    <label class="check"><input type="checkbox" value="High salt intake"> High salt intake</label>
+                                    <label class="check"><input type="checkbox" value="Coffee consumption"> Coffee</label>
+                                    <label class="check"><input type="checkbox" value="Soft drinks"> Soft drinks</label>
+                                    <label class="check"><input type="checkbox" value="Low water intake"> Low water intake</label>
+                                    <label class="check"><input type="checkbox" value="Frequent outside food"> Frequent outside food</label>
+                                </div>
                             </div>
-                        </div>
-                    </div>
-
-                    <!-- Allergies & Triggers Card -->
-                    <div class="card allergy-card">
-                        <div class="card-icon">
-                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-                        </div>
-                        <h3>Potential Triggers</h3>
-                        <div id="triggerContent">
-                            <form id="triggerForm">
-                                <div class="form-group">
-                                    <label>Food Habits (Select all that apply)</label>
-                                    <div class="checkbox-grid" id="foodHabitsGrid">
-                                        <label><input type="checkbox" value="Spicy foods"> Spicy foods</label>
-                                        <label><input type="checkbox" value="Oily / fried foods"> Oily / fried foods</label>
-                                        <label><input type="checkbox" value="Junk / fast food"> Junk / fast food</label>
-                                        <label><input type="checkbox" value="Sugary foods"> Sugary foods (sweets, chocolates)</label>
-                                        <label><input type="checkbox" value="Dairy products"> Dairy products (milk, cheese, butter)</label>
-                                        <label><input type="checkbox" value="Seafood"> Seafood (fish, prawns)</label>
-                                        <label><input type="checkbox" value="Eggs"> Eggs</label>
-                                        <label><input type="checkbox" value="Nuts"> Nuts (peanuts, cashews, almonds)</label>
-                                        <label><input type="checkbox" value="Gluten-based foods"> Gluten-based foods (wheat, bread)</label>
-                                        <label><input type="checkbox" value="Processed foods"> Processed / packaged foods</label>
-                                        <label><input type="checkbox" value="High salt intake"> High salt intake</label>
-                                        <label><input type="checkbox" value="Coffee consumption"> Coffee consumption</label>
-                                        <label><input type="checkbox" value="Soft drinks"> Soft drinks / carbonated beverages</label>
-                                        <label><input type="checkbox" value="Low water intake"> Low water intake</label>
-                                        <label><input type="checkbox" value="Frequent outside food"> Frequent outside food</label>
-                                    </div>
+                            <div class="field">
+                                <span class="label">Skin-care products</span>
+                                <div class="check-grid" id="productsUsedGrid">
+                                    <label class="check"><input type="checkbox" value="Face wash"> Face wash</label>
+                                    <label class="check"><input type="checkbox" value="Soap"> Soap (body / face)</label>
+                                    <label class="check"><input type="checkbox" value="Moisturizer"> Moisturiser</label>
+                                    <label class="check"><input type="checkbox" value="Sunscreen"> Sunscreen</label>
+                                    <label class="check"><input type="checkbox" value="Toner"> Toner</label>
+                                    <label class="check"><input type="checkbox" value="Serum"> Serum</label>
+                                    <label class="check"><input type="checkbox" value="Acne creams"> Acne creams / ointments</label>
+                                    <label class="check"><input type="checkbox" value="Makeup"> Makeup</label>
+                                    <label class="check"><input type="checkbox" value="Makeup remover"> Makeup remover</label>
+                                    <label class="check"><input type="checkbox" value="Shampoo"> Shampoo</label>
+                                    <label class="check"><input type="checkbox" value="Conditioner"> Conditioner</label>
+                                    <label class="check"><input type="checkbox" value="Hair oil"> Hair oil</label>
+                                    <label class="check"><input type="checkbox" value="Body lotion"> Body lotion</label>
+                                    <label class="check"><input type="checkbox" value="Perfume"> Perfume / deodorant</label>
+                                    <label class="check"><input type="checkbox" value="Recently changed skincare products"> Recently changed products</label>
                                 </div>
-                                <div class="form-group">
-                                    <label>Skincare / Product Usage (Select all that apply)</label>
-                                    <div class="checkbox-grid" id="productsUsedGrid">
-                                        <label><input type="checkbox" value="Face wash"> Face wash (regular use)</label>
-                                        <label><input type="checkbox" value="Soap"> Soap (body/face)</label>
-                                        <label><input type="checkbox" value="Moisturizer"> Moisturizer</label>
-                                        <label><input type="checkbox" value="Sunscreen"> Sunscreen</label>
-                                        <label><input type="checkbox" value="Toner"> Toner</label>
-                                        <label><input type="checkbox" value="Serum"> Serum</label>
-                                        <label><input type="checkbox" value="Acne creams"> Acne creams / medicated ointments</label>
-                                        <label><input type="checkbox" value="Makeup"> Makeup (foundation, compact, etc.)</label>
-                                        <label><input type="checkbox" value="Makeup remover"> Makeup remover</label>
-                                        <label><input type="checkbox" value="Shampoo"> Shampoo</label>
-                                        <label><input type="checkbox" value="Conditioner"> Conditioner</label>
-                                        <label><input type="checkbox" value="Hair oil"> Hair oil</label>
-                                        <label><input type="checkbox" value="Body lotion"> Body lotion</label>
-                                        <label><input type="checkbox" value="Perfume"> Perfume / deodorant</label>
-                                        <label><input type="checkbox" value="Recently changed skincare products"> Recently changed skincare products</label>
-                                    </div>
-                                </div>
-                                <button type="submit" class="btn-process">Update Habits</button>
-                            </form>
-                            <div id="triggerSuggestions" class="trigger-suggestions"></div>
-                        </div>
+                            </div>
+                            <div class="form-actions"><button type="submit" class="btn btn-primary">Save and get tips</button></div>
+                        </form>
+                        <div id="triggerSuggestions" class="trigger-suggestions"></div>
                     </div>
-                </div>
-            </section>
-
-            <!-- Glossary Section -->
-            <section id="section-glossary" class="content-section hidden">
-                <div class="card">
-                    <h2 style="margin-bottom: 1.5rem; color: #1e3a8a;">Disease Glossary</h2>
-                    <p style="color: var(--text-dim); margin-bottom: 2rem;">Overview of dermatological conditions currently supported by the AI model.</p>
-                    <div id="glossaryGrid" class="glossary-grid"></div>
                 </div>
             </section>
         </main>
-    </div>
 
-    <!-- Skin Type Quiz Modal -->
-    <div id="quizModal" class="modal hidden">
-        <div class="modal-content">
-            <h2>Skin Type Detection Quiz</h2>
-            <div id="quizQuestion">
-                <!-- Question will be injected here -->
-            </div>
-            <div class="modal-footer">
-                <button id="quizNextBtn" class="btn-process">Next</button>
-            </div>
-        </div>
-    </div>
-
-        <footer id="appFooter">
-            <p>&copy; 2026 SkinSense AI Clinical Systems. All rights reserved.</p>
+        <footer class="app-footer">
+            <p class="fine">&copy; 2026 SkinSense AI. Educational screening aid only - not a medical diagnosis. Trained on dermoscopic images (HAM10000);
+                accuracy on phone photos and darker skin tones is not validated. Always consult a qualified dermatologist.</p>
         </footer>
     </div>
 
-    <!-- Chat Widget -->
-    <div id="chatWidget" class="chat-widget hidden">
-        <div class="chat-header">
-            <h4>Clinical AI Assistant</h4>
-            <button onclick="toggleChat()" class="btn-close">&times;</button>
+    <!-- Chat -->
+    <button id="openChatBtn" class="chat-fab" type="button" aria-label="Open assistant" aria-controls="chatWidget"><svg class="i i-lg"><use href="#i-message"/></svg></button>
+    <section id="chatWidget" class="chat-widget hidden" aria-label="Skin health assistant">
+        <div class="chat-head">
+            <span class="dot"></span>
+            <h4>Skin health assistant</h4>
+            <button class="btn btn-ghost btn-icon" id="closeChatBtn" type="button" aria-label="Close assistant"><svg class="i"><use href="#i-x"/></svg></button>
         </div>
-        <div id="chatMessages" class="chat-messages">
-            <div class="message ai-message">Hello. I am the SkinSense AI clinical assistant. How can I help you regarding dermatological conditions today?</div>
+        <div id="chatMessages" class="chat-messages" aria-live="polite">
+            <div class="msg bot">Hi! I can answer general questions about the skin conditions the model can recognise. I can't diagnose - please see a dermatologist for that.</div>
         </div>
-        <div class="chat-input-area">
-            <input type="text" id="chatInput" placeholder="Ask a medical question...">
-            <button id="sendChatBtn" class="btn-primary">Send</button>
+        <div class="chips" id="chatChips">
+            <button type="button" class="chip">What are the symptoms of melanoma?</button>
+            <button type="button" class="chip">How do I protect my skin from the sun?</button>
+            <button type="button" class="chip">When should I see a doctor?</button>
         </div>
-    </div>
-    
-    <button id="openChatBtn" class="chat-fab hidden" onclick="toggleChat()">
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
-    </button>
+        <form class="chat-form" id="chatForm">
+            <input class="input" id="chatInput" placeholder="Ask a question..." maxlength="1000" autocomplete="off" aria-label="Your question">
+            <button class="btn btn-primary btn-icon" id="sendChatBtn" type="submit" aria-label="Send"><svg class="i"><use href="#i-send"/></svg></button>
+        </form>
+    </section>
+</div>
 
-    <!-- Leaflet Maps (Free & Inbuilt Alternative) -->
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <script src="js/app_v2.js?v=2"></script>
+<!-- Toasts + confirm dialog -->
+<div class="toasts" id="toasts" aria-live="polite" aria-atomic="false"></div>
+<dialog id="dialog">
+    <form method="dialog" class="dialog-card" id="dlgForm">
+        <h3 id="dlgTitle">Confirm</h3>
+        <p id="dlgMessage"></p>
+        <div class="field hidden" id="dlgPasswordWrap" style="margin:0">
+            <label for="dlgPassword">Password</label>
+            <input class="input" type="password" id="dlgPassword" autocomplete="current-password">
+        </div>
+        <div class="dialog-actions">
+            <button type="button" class="btn btn-secondary" id="dlgCancel">Cancel</button>
+            <button type="submit" class="btn btn-primary" id="dlgConfirm">Confirm</button>
+        </div>
+    </form>
+</dialog>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="js/app.js?v=3"></script>
 </body>
 </html>
