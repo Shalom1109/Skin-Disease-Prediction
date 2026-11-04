@@ -32,3 +32,20 @@ dataset/
 
 # Log files
 *.log
+
+# Added: runtime secrets / generated data
+backend/.secret_key
+.env
+splits.json
+train_log.txt
+backend/checkpoint_latest.pth
+backend/*.pth
+.pytest_cache/
+
+# model runs (large weights)
+runs/*/*.pth
+
+# scratch: training process ids, old logs, model run folders (weights are large)
+*.pid
+train_log*.txt
+runs/

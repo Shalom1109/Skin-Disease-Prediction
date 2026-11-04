@@ -1,78 +1,94 @@
-# SkinSense AI - Clinical Skin Disease Diagnosis System
+# SkinSense AI - Skin Lesion Screening Demo
 
-SkinSense AI is a high-performance deep learning web application designed for the accurate prediction and classification of skin diseases. It combines a state-of-the-art visual deep learning triple ensemble model with a contextual Retrieval-Augmented Generation (RAG) pipeline for clinical summary synthesis.
+SkinSense AI classifies a skin-lesion photo into one of seven HAM10000 categories with a triple-backbone ensemble
+(**ConvNeXt-B + ViT-B + MaxViT-B**), then shows a curated clinical summary, keeps a private scan history and offers a
+nearby-dermatologist finder.
 
-## 🚀 Key Features
+> **Not a medical device.** It is an educational screening aid trained on dermoscopic images. It cannot diagnose
+> anything. See [MODEL_CARD.md](MODEL_CARD.md) for intended use and limitations.
+> Measured on a held-out, lesion-grouped test split of HAM10000: **80.2 % accuracy, 72.7 % balanced accuracy**,
+> melanoma AUC 0.92, and 90.8 % melanoma sensitivity at the safety threshold (with about 27 % false alarms).
+> That is a demo-level result on dermoscopy images, not clinical performance. Details and caveats: [MODEL_CARD.md](MODEL_CARD.md).
 
-* **Triple Ensemble Classifier**: Combines **ConvNeXt Base**, **Vision Transformer (ViT) Base**, and **MaxViT Base** to fuse local, global, and hybrid attention features for diagnosis.
-* **Over 96% Classification Accuracy**: Fine-tuned on the **HAM10000** dataset with advanced training strategies (AMP, AdamW, Label Smoothing, parameter freezing, and weighted random sampling).
-* **Clinical RAG System**: Dynamically retrieves medical descriptions, recommendations, and important Do's & Don'ts for the predicted condition.
-* **Modern Web Dashboard**: Features a responsive glassmorphic user interface built with HTML5, CSS3, and JavaScript, showing real-time diagnosis graphs and clinical summaries.
-* **SQL Console**: Interactive dashboard tool for checking and managing user data/prediction logs.
+## Features
+- 7-class ensemble classifier with temperature-calibrated confidence and top-3 probabilities.
+- Melanoma safety escalation with a **validated** threshold (fitted on the validation split by `evaluate.py`).
+- Curated, schema-validated knowledge base (`data/knowledge_base.json`) + lexical retrieval for the chat assistant.
+  An optional local LLM (Ollama) can phrase chat answers; it is **off** by default.
+- Accounts (JWT, rate-limited login), private image storage, per-scan and full-account deletion.
+- Professional, responsive UI (light/dark themes, mobile drawer navigation, accessible dialogs and toasts, printable report).
+- Scan history, skin profile, ABCDE checklist, weather advice (Open-Meteo) and a clinic finder (OpenStreetMap). Location is only
+  requested when you press a button.
+- Reproducible research pipeline: lesion-grouped splits, balanced-accuracy model selection, full evaluation report.
 
----
+## Setup
+Python 3.10+.
 
-## 🛠️ Repository Setup
-
-To keep the repository clean and comply with GitHub's file size limit (100MB), the large model weights, SQLite database logs, and raw dataset images are excluded from Git. Follow the setup below to restore them.
-
-### 1. Prerequisites
-Make sure you have Python 3.10+ installed.
-
-### 2. Install Dependencies
-Navigate to the `backend` directory and install the required libraries:
 ```bash
-cd backend
-pip install -r requirements.txt
+pip install -r requirements.txt          # run the app
+pip install -r requirements-train.txt    # + training / evaluation
+pip install -r requirements-dev.txt      # + tests
 ```
 
-### 3. Model Weights & Dataset Setup
-* **Model Weights**: Place your pre-trained `skin_sense_ensemble_best.pth` file into the `backend/` directory:
-  `backend/skin_sense_ensemble_best.pth`
-* **Dataset**: If you plan to retrain or run validation, place the HAM10000 images in the `dataset/` folder in the project root:
-  `dataset/`
+**Weights** (not in git): place `skin_sense_ensemble_best.pth` in `backend/` (or set `SKINSENSE_WEIGHTS=/path/file.pth`).
+Without weights the API starts but `/predict` answers **503** - it never silently predicts with random weights
+(`SKINSENSE_ALLOW_UNTRAINED=1` overrides this for development only).
 
----
+## Run
+Windows: double-click `LAUNCH_SKINSENSE_AI.bat` (or `Open_SkinSense.vbs` for a hidden background server), or:
 
-## 🏁 Running the Application
-
-For a quick setup, you can launch the app directly:
-
-### On Windows
-1. Double-click the **`LAUNCH_SKINSENSE_AI.bat`** file in the root folder.
-2. The unified FastAPI server will launch at `http://127.0.0.1:8000` and automatically open in your default browser.
-
-### Manually (Terminal)
-Navigate to the backend directory and run the Uvicorn server:
 ```bash
 cd backend
 python -m uvicorn app:app --host 127.0.0.1 --port 8000
 ```
-Then open `http://127.0.0.1:8000` in your web browser.
+Open <http://127.0.0.1:8000>. `Stop_SkinSense.bat` stops the server.
 
----
+## Train and evaluate properly
+1. Put HAM10000 in an `ImageFolder` layout (`dataset/akiec`, `bcc`, `bkl`, `df`, `mel`, `nv`, `vasc`) and download `HAM10000_metadata.csv`.
+2. Train: `python train.py --data-dir dataset --metadata HAM10000_metadata.csv [--finetune]`
+3. Evaluate + calibrate: `python evaluate.py --data-dir dataset --metadata HAM10000_metadata.csv`
+   -> `reports/evaluation.md`, `reports/confusion_matrix.png`, and `backend/calibration.json` (loaded by the API).
+4. Optional cross-validation: `python train_kfold.py --data-dir dataset --metadata HAM10000_metadata.csv`
 
-## 🏗️ Architecture Summary
+The metadata CSV matters: HAM10000 has several photos per lesion, and splitting by image leaks the same lesion into
+train and test. With the CSV, splits are grouped by `lesion_id` and checked for overlap.
 
+## Configuration (environment variables)
+| Variable | Default | Purpose |
+|---|---|---|
+| `SKINSENSE_SECRET_KEY` | random, stored in `backend/.secret_key` | JWT signing key |
+| `SKINSENSE_ORIGINS` | `http://127.0.0.1:8000,http://localhost:8000` | allowed CORS origins |
+| `SKINSENSE_WEIGHTS` | auto (`*best*`, then `*final*` in `backend/`) | model file |
+| `SKINSENSE_MAX_UPLOAD_MB` | 8 | upload limit |
+| `SKINSENSE_DEVICE` | `auto` | `auto` uses the GPU when CUDA is available (about 0.5 s per image vs 5 s on CPU); `cpu` forces CPU |
+| `SKINSENSE_TOKEN_MINUTES` | 60 | login lifetime |
+| `SKINSENSE_LLM` / `SKINSENSE_LLM_URL` / `SKINSENSE_LLM_MODEL` | off / - / `llama3` | optional LLM for chat (`SKINSENSE_LLM=ollama`; needs `pip install openai`) |
+| `SKINSENSE_DB`, `SKINSENSE_UPLOADS` | `backend/skinsense.db`, `backend/uploads` | storage locations |
+
+## Tests
+```bash
+python -m pytest -q
 ```
-                       [ Frontend Web UI ]
-                       (HTML5, CSS3, JS)
-                               │ (API Requests / JWT Auth)
-                               ▼
-                      [ FastAPI Backend ]
-                               │
-            ┌──────────────────┴──────────────────┐
-            ▼                                     ▼
- [ Triple Ensemble Model ]            [ RAG / Ollama System ]
- (ConvNeXt + ViT + MaxViT)             (Offline RAG Database)
-            │                                     │
-            └──────────────────┬──────────────────┘
-                               ▼
-                     [ SQLite Database ]
-                      (Logs & Accounts)
+45 tests cover auth, rate limiting, upload validation, privacy (image ownership, EXIF stripping, deletion), the
+decision logic, calibration metrics, lesion-grouped splits, the knowledge base and front-end consistency (every id the
+script uses exists, icons are defined, assets exist, valid JS). They use a fake model, so no
+weights or network are needed. `scripts/smoke_predict.py` is a manual end-to-end check against a running server
+(it is *not* an accuracy test).
+
+## Architecture
+```
+Browser (HTML/CSS/JS) --JWT--> FastAPI (backend/app.py)
+                                  |-- inference.py  preprocess, temperature, escalation rule  <- calibration.json
+                                  |-- model.py      ConvNeXt + ViT + MaxViT ensemble
+                                  |-- rag.py        curated KB + retrieval (+ optional local LLM for chat)
+                                  |-- database.py   SQLite: users, history
+                                  `-- security.py   rate limiter
+Offline: train.py / train_kfold.py / evaluate.py share backend/data_utils.py (grouped splits) and backend/metrics.py
 ```
 
----
+## Utilities
+- `python sql_console.py` - read-only database browser (`--write` to modify, with confirmation).
+- `python scripts/check_model_forward.py` - builds the ensemble and runs one forward pass.
 
-## 📝 License
-This project is licensed under the MIT License.
+## License
+MIT
