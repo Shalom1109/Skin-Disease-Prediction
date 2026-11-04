@@ -134,3 +134,107 @@ def collect_logits(model, loader, device, log_every=0):
             if log_every and (i % log_every == 0 or i == total):
                 log.info("evaluation batch [%d/%d]", i, total)
     return np.concatenate(all_logits), np.concatenate(all_labels)
+
+
+# ---------------------------------------------------------------------------
+# Per-model outputs, test-time augmentation, uncertainty, confidence intervals
+# ---------------------------------------------------------------------------
+def collect_outputs(model, loader, device, tta=False, log_every=0):
+    """-> (ensemble logits [N,K], per-model logits [N,3,K], labels [N]) as float64 numpy.
+
+    tta=True averages the logits over 4 views (identity, horizontal, vertical, both flips)."""
+    import logging
+    log = logging.getLogger("skinsense.eval")
+    model.eval()
+    device_type = torch.device(device).type
+    ens_all, parts_all, labels_all = [], [], []
+    total = len(loader)
+    with torch.no_grad(), torch.autocast(device_type=device_type, enabled=device_type == "cuda"):
+        for i, (images, labels) in enumerate(loader, 1):
+            x = images.to(device)
+            views = [x] if not tta else [x, x.flip(-1), x.flip(-2), x.flip(-1).flip(-2)]
+            parts = sum(torch.stack(model.forward_parts(v), dim=1).float() for v in views) / len(views)
+            ens = model.w1 * parts[:, 0] + model.w2 * parts[:, 1] + model.w3 * parts[:, 2]
+            ens_all.append(ens.double().cpu().numpy())
+            parts_all.append(parts.double().cpu().numpy())
+            labels_all.append(labels.numpy())
+            if log_every and (i % log_every == 0 or i == total):
+                log.info("evaluation batch [%d/%d]", i, total)
+    return np.concatenate(ens_all), np.concatenate(parts_all), np.concatenate(labels_all)
+
+
+def disagreement(parts_logits):
+    """How much the three networks disagree: mean pairwise total-variation distance of their
+    softmax outputs, in [0, 1]. parts_logits: [N,3,K]."""
+    z = parts_logits - parts_logits.max(axis=-1, keepdims=True)
+    p = np.exp(z)
+    p /= p.sum(axis=-1, keepdims=True)
+    pairs = [(0, 1), (0, 2), (1, 2)]
+    return np.mean([0.5 * np.abs(p[:, a] - p[:, b]).sum(axis=-1) for a, b in pairs], axis=0)
+
+
+def error_detection_auroc(labels, probs, uncertainty):
+    """AUROC of `uncertainty` as a detector of wrong predictions (0.5 = useless, 1.0 = perfect)."""
+    from sklearn.metrics import roc_auc_score
+    wrong = (np.asarray(probs).argmax(axis=1) != np.asarray(labels)).astype(int)
+    if wrong.sum() in (0, len(wrong)):
+        return float("nan")
+    return float(roc_auc_score(wrong, uncertainty))
+
+
+def risk_coverage(labels, probs, uncertainty, mel_idx, coverages=(1.0, 0.9, 0.8, 0.7, 0.5)):
+    """Abstention analysis: keep only the most certain `coverage` fraction of cases and score those."""
+    labels, probs, uncertainty = np.asarray(labels), np.asarray(probs), np.asarray(uncertainty)
+    order = np.argsort(uncertainty, kind="stable")          # most certain first
+    preds_all = probs.argmax(axis=1)
+    n_mel = int((labels == mel_idx).sum())
+    rows = []
+    for c in coverages:
+        keep = order[: max(1, int(round(c * len(labels))))]
+        y, p = labels[keep], preds_all[keep]
+        recalls = [(p[y == k] == k).mean() for k in np.unique(y)]
+        rows.append({
+            "coverage": float(c),
+            "accuracy": float((y == p).mean()),
+            "balanced_accuracy": float(np.mean(recalls)),
+            "melanomas_kept": float((y == mel_idx).sum() / max(n_mel, 1)),
+        })
+    return rows
+
+
+def _cm_stats(y, p, k):
+    cm = np.bincount(y * k + p, minlength=k * k).reshape(k, k)
+    tp = np.diag(cm).astype(float)
+    support, predicted = cm.sum(axis=1), cm.sum(axis=0)
+    recall = np.divide(tp, support, out=np.zeros(k), where=support > 0)
+    denom = support + predicted
+    f1 = np.divide(2 * tp, denom, out=np.zeros(k), where=denom > 0)
+    return tp.sum() / cm.sum(), recall[support > 0].mean(), f1.mean()
+
+
+def bootstrap_ci(labels, probs, groups, mel_idx, mel_threshold, n_boot=1000, seed=0):
+    """95 % confidence intervals by resampling whole LESIONS (photos of one lesion stay together)."""
+    from sklearn.metrics import roc_auc_score
+    labels, probs = np.asarray(labels), np.asarray(probs)
+    k = probs.shape[1]
+    preds = probs.argmax(axis=1)
+    _, inverse = np.unique(np.asarray(groups), return_inverse=True)
+    members = [np.where(inverse == g)[0] for g in range(inverse.max() + 1)]
+    rng = np.random.default_rng(seed)
+    out = {n: [] for n in ("accuracy", "balanced_accuracy", "macro_f1", "melanoma_auc",
+                           "melanoma_sensitivity", "melanoma_specificity")}
+    for _ in range(n_boot):
+        idx = np.concatenate([members[g] for g in rng.integers(0, len(members), len(members))])
+        y, p = labels[idx], preds[idx]
+        acc, bal, f1 = _cm_stats(y, p, k)
+        is_mel = y == mel_idx
+        if is_mel.sum() == 0 or is_mel.sum() == len(y):
+            continue
+        flagged = probs[idx, mel_idx] >= mel_threshold
+        out["accuracy"].append(acc)
+        out["balanced_accuracy"].append(bal)
+        out["macro_f1"].append(f1)
+        out["melanoma_auc"].append(roc_auc_score(is_mel, probs[idx, mel_idx]))
+        out["melanoma_sensitivity"].append((flagged & is_mel).sum() / is_mel.sum())
+        out["melanoma_specificity"].append((~flagged & ~is_mel).sum() / (~is_mel).sum())
+    return {n: {"low": float(np.percentile(v, 2.5)), "high": float(np.percentile(v, 97.5))} for n, v in out.items()}

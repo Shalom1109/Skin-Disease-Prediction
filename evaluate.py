@@ -25,7 +25,7 @@ from torch.utils.data import DataLoader
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from backend import metrics as M  # noqa: E402
-from backend.data_utils import load_or_make_splits, make_subsets  # noqa: E402
+from backend.data_utils import find_metadata_csv, load_groups, load_or_make_splits, make_subsets  # noqa: E402
 from backend.model import get_model  # noqa: E402
 
 
@@ -77,6 +77,8 @@ def main():
     p.add_argument("--calibration-out", default="backend/calibration.json")
     p.add_argument("--no-write-calibration", action="store_true")
     p.add_argument("--seed", type=int, default=42)
+    p.add_argument("--tta", action="store_true", help="test-time augmentation: average over 4 flip views (4x slower)")
+    p.add_argument("--bootstrap", type=int, default=1000, help="lesion-level bootstrap resamples for 95%% CIs (0 = off)")
     args = p.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -88,8 +90,8 @@ def main():
 
     model = get_model(num_classes=len(names), checkpoint_path=weights).to(device)
     mk = lambda ds: DataLoader(ds, batch_size=args.batch_size, shuffle=False, num_workers=2)
-    val_logits, val_y = M.collect_logits(model, mk(val_ds), device)
-    test_logits, test_y = M.collect_logits(model, mk(test_ds), device)
+    val_logits, val_parts, val_y = M.collect_outputs(model, mk(val_ds), device, tta=args.tta)
+    test_logits, test_parts, test_y = M.collect_outputs(model, mk(test_ds), device, tta=args.tta)
 
     mel = names.index("Melanoma")
     T = M.fit_temperature(val_logits, val_y)
@@ -108,9 +110,30 @@ def main():
         rep["melanoma_rule"] = M.sensitivity_specificity(probs[:, mel], test_y == mel, thr) if label == "temperature_scaled" else None
         report[label] = rep
 
+    # ---- uncertainty / abstention, confidence intervals -------------------------------------------
+    test_probs = M.softmax(test_logits, T)
+    u_conf = 1.0 - test_probs.max(axis=1)
+    u_dis = M.disagreement(test_parts)
+    unc = {"confidence (1 - max prob)": u_conf, "network disagreement": u_dis,
+           "combined": u_conf + u_dis}
+    uncertainty = {
+        name: {"error_detection_auroc": M.error_detection_auroc(test_y, test_probs, u),
+               "risk_coverage": M.risk_coverage(test_y, test_probs, u, mel)}
+        for name, u in unc.items()
+    }
+    ci = None
+    if args.bootstrap > 0:
+        csv_path = find_metadata_csv(args.data_dir, args.metadata)
+        groups_all, _ = load_groups(_s, csv_path)
+        test_groups = [groups_all[i] for i in splits["test"]]
+        ci = M.bootstrap_ci(test_y, test_probs, test_groups, mel, thr, n_boot=args.bootstrap)
+
     out = Path(args.out_dir)
     out.mkdir(exist_ok=True)
     result = {
+        "tta": bool(args.tta),
+        "uncertainty": uncertainty,
+        "confidence_intervals_95": ci,
         "date": datetime.datetime.now().isoformat(timespec="seconds"),
         "weights": weights,
         "lesion_grouped_split": info["grouped_by_lesion"],
@@ -121,6 +144,11 @@ def main():
         "test": report,
     }
     (out / "evaluation.json").write_text(json.dumps(result, indent=2))
+    # raw outputs, so later analyses (metadata fusion, calibration studies) need no second GPU pass
+    np.savez_compressed(out / "outputs.npz",
+                        val_logits=val_logits, val_parts=val_parts, val_y=val_y, val_idx=np.array(splits["val"]),
+                        test_logits=test_logits, test_parts=test_parts, test_y=test_y, test_idx=np.array(splits["test"]),
+                        temperature=T, melanoma_threshold=thr, tta=bool(args.tta))
     save_confusion_png(report["temperature_scaled"]["confusion_matrix"], names, out / "confusion_matrix.png")
 
     ts = report["temperature_scaled"]
@@ -145,7 +173,22 @@ def main():
               f"- Validation: sensitivity {val_sens:.3f}, specificity {val_spec:.3f}",
               f"- **Test**: sensitivity {rule['sensitivity']:.3f}, specificity {rule['specificity']:.3f} "
               f"({rule['n_positive']} melanomas, {rule['n_negative']} others)", "",
-              "![confusion matrix](confusion_matrix.png)", ""]
+              ""]
+    lines.append(f"Test-time augmentation: **{'on' if args.tta else 'off'}**")
+    if ci:
+        lines += ["", f"## 95% confidence intervals (lesion-level bootstrap, {args.bootstrap} resamples)", "",
+                  "| Metric | Low | High |", "|---|---|---|"]
+        lines += [f"| {k} | {v['low']:.3f} | {v['high']:.3f} |" for k, v in ci.items()]
+    lines += ["", "## Uncertainty and abstention", "",
+              "Keeping only the most certain cases (abstaining on the rest). Higher accuracy at lower coverage means the "
+              "uncertainty score is useful.", ""]
+    for name, u in uncertainty.items():
+        lines += [f"**{name}** - AUROC for spotting wrong predictions: {u['error_detection_auroc']:.3f}", "",
+                  "| Coverage | Accuracy | Balanced acc. | Melanomas still covered |", "|---|---|---|---|"]
+        lines += [f"| {r['coverage']:.0%} | {r['accuracy']:.1%} | {r['balanced_accuracy']:.1%} | {r['melanomas_kept']:.0%} |"
+                  for r in u["risk_coverage"]]
+        lines.append("")
+    lines += ["![confusion matrix](confusion_matrix.png)", ""]
     (out / "evaluation.md").write_text("\n".join(lines), encoding="utf-8")
 
     if not args.no_write_calibration:
@@ -163,6 +206,12 @@ def main():
     print(f"\nTEST  accuracy {ts['accuracy']:.4f} | balanced acc {ts['balanced_accuracy']:.4f} | "
           f"macro-F1 {ts['macro_f1']:.4f} | AUC {ts['macro_auc_ovr']:.4f} | ECE {ts['ece']:.4f}")
     print(f"      melanoma rule @ {thr:.4f}: sensitivity {rule['sensitivity']:.3f}, specificity {rule['specificity']:.3f}")
+    if ci:
+        print("95% CI: " + " | ".join(f"{k} {v['low']:.3f}-{v['high']:.3f}" for k, v in ci.items()))
+    for name, u in uncertainty.items():
+        r = {x['coverage']: x for x in u['risk_coverage']}
+        print(f"uncertainty [{name}]: error-detection AUROC {u['error_detection_auroc']:.3f} | "
+              f"accuracy at 100/80/50% coverage: {r[1.0]['accuracy']:.1%} / {r[0.8]['accuracy']:.1%} / {r[0.5]['accuracy']:.1%}")
     print(f"Report written to {out}/")
 
 

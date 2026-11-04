@@ -130,3 +130,81 @@ def test_per_image_split_would_leak_demonstration():
     perm = np.random.default_rng(0).permutation(len(groups))
     train, test = perm[:700], perm[700:]
     assert set(groups[train]) & set(groups[test])
+
+
+# ---------------------------------------------------------------- uncertainty, CIs, per-model outputs
+def test_disagreement_is_zero_when_networks_agree_and_large_when_they_do_not():
+    same = np.tile(np.array([[5.0, 0, 0, 0, 0, 0, 0]]), (4, 3, 1))
+    assert M.disagreement(same) == pytest.approx(np.zeros(4))
+    split = np.zeros((1, 3, 7))
+    split[0, 0, 0] = split[0, 1, 1] = split[0, 2, 2] = 20.0
+    assert M.disagreement(split)[0] > 0.9
+
+
+def test_error_detection_auroc_perfect_and_random():
+    probs = np.tile([0.9, 0.1], (100, 1))
+    labels = np.array([0] * 50 + [1] * 50)           # second half is wrong
+    perfect = np.array([0.0] * 50 + [1.0] * 50)
+    assert M.error_detection_auroc(labels, probs, perfect) == pytest.approx(1.0)
+    rng = np.random.default_rng(0)
+    assert 0.35 < M.error_detection_auroc(labels, probs, rng.random(100)) < 0.65
+
+
+def test_risk_coverage_improves_accuracy_when_abstaining_on_the_uncertain():
+    labels = np.array([0] * 80 + [1] * 20)
+    probs = np.tile([0.9, 0.1], (100, 1))            # always predicts class 0 -> class-1 cases are wrong
+    uncertainty = np.array([0.1] * 80 + [0.9] * 20)  # the wrong ones are flagged uncertain
+    rows = {r["coverage"]: r for r in M.risk_coverage(labels, probs, uncertainty, mel_idx=1)}
+    assert rows[1.0]["accuracy"] == pytest.approx(0.8)
+    assert rows[0.8]["accuracy"] == pytest.approx(1.0)
+    assert rows[0.8]["melanomas_kept"] == pytest.approx(0.0)       # abstaining drops those cases
+
+
+def test_bootstrap_ci_brackets_the_point_estimate_and_keeps_lesions_together():
+    rng = np.random.default_rng(1)
+    n, k = 600, 7
+    labels = rng.integers(0, k, n)
+    probs = np.full((n, k), 0.02)
+    right = rng.random(n) < 0.7
+    pred = np.where(right, labels, (labels + 1) % k)
+    probs[np.arange(n), pred] = 0.88
+    probs /= probs.sum(axis=1, keepdims=True)
+    groups = np.repeat(np.arange(n // 2), 2)
+    ci = M.bootstrap_ci(labels, probs, groups, mel_idx=4, mel_threshold=0.1, n_boot=200, seed=0)
+    acc = (probs.argmax(1) == labels).mean()
+    assert ci["accuracy"]["low"] < acc < ci["accuracy"]["high"]
+    assert 0.0 < ci["accuracy"]["high"] - ci["accuracy"]["low"] < 0.15
+    assert set(ci) == {"accuracy", "balanced_accuracy", "macro_f1", "melanoma_auc",
+                       "melanoma_sensitivity", "melanoma_specificity"}
+
+
+def test_collect_outputs_tta_averages_views_and_matches_forward():
+    import torch
+    from torch.utils.data import DataLoader, TensorDataset
+
+    class Tiny(torch.nn.Module):
+        w1, w2, w3 = 0.4, 0.3, 0.3
+
+        def __init__(self):
+            super().__init__()
+            self.lin = torch.nn.ModuleList([torch.nn.Linear(12, 7) for _ in range(3)])
+
+        def forward_parts(self, x):
+            flat = x.flatten(1)
+            return tuple(l(flat) for l in self.lin)
+
+        def forward(self, x):
+            a, b, c = self.forward_parts(x)
+            return self.w1 * a + self.w2 * b + self.w3 * c
+
+    torch.manual_seed(0)
+    model = Tiny()
+    data = TensorDataset(torch.randn(6, 3, 2, 2), torch.arange(6) % 7)
+    loader = DataLoader(data, batch_size=3)
+    ens, parts, labels = M.collect_outputs(model, loader, "cpu", tta=False)
+    assert ens.shape == (6, 7) and parts.shape == (6, 3, 7) and labels.tolist() == list(range(6))
+    x = data.tensors[0]
+    assert np.allclose(ens, model(x).detach().numpy(), atol=1e-5)
+    ens_tta, _, _ = M.collect_outputs(model, loader, "cpu", tta=True)
+    expected = np.mean([model(v).detach().numpy() for v in (x, x.flip(-1), x.flip(-2), x.flip(-1).flip(-2))], axis=0)
+    assert np.allclose(ens_tta, expected, atol=1e-5)

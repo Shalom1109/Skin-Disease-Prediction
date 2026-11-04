@@ -53,10 +53,13 @@ class SkinSenseEnsemble(nn.Module):
         head_ids = {id(p) for p in self.head_parameters()}
         return [p for p in self.parameters() if p.requires_grad and id(p) not in head_ids]
 
+    def forward_parts(self, x):
+        """Logits of the three member networks (used for disagreement-based uncertainty)."""
+        return self.convnext(x), self.vit(x), self.maxvit(x)
+
     def forward(self, x):
-        return (self.w1 * self.convnext(x)
-                + self.w2 * self.vit(x)
-                + self.w3 * self.maxvit(x))
+        a, b, c = self.forward_parts(x)
+        return self.w1 * a + self.w2 * b + self.w3 * c
 
 
 def load_state(path, map_location='cpu'):
