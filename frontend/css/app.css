@@ -328,6 +328,18 @@ form[data-mode="register"] .register-only { display: block; }
 .risk-gauge-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: .6rem; font-size: .85rem; font-weight: 600; }
 #abcdeRiskBarFill { transition: width .35s ease, background .2s; }
 
+/* ---------- Referral ---------- */
+.referral { display: grid; grid-template-columns: 48px minmax(0, 1fr); gap: 1.1rem; align-items: start; padding: 1.4rem 1.5rem; border-left: 5px solid var(--border-strong); }
+.referral h2 { font-size: clamp(1.2rem, 2.2vw, 1.5rem); letter-spacing: -.02em; margin: .15rem 0 .4rem; }
+.referral-icon { display: grid; place-items: center; width: 48px; height: 48px; border-radius: 14px; background: var(--neutral-soft); color: var(--neutral); }
+.referral-meta { margin: .6rem 0 .5rem; }
+.referral[data-level="priority"] { border-left-color: var(--danger); }
+.referral[data-level="priority"] .referral-icon { background: var(--danger-soft); color: var(--danger); }
+.referral[data-level="soon"] { border-left-color: var(--warn); }
+.referral[data-level="soon"] .referral-icon { background: var(--warn-soft); color: var(--warn); }
+.referral[data-level="routine"] { border-left-color: var(--success); }
+.referral[data-level="routine"] .referral-icon { background: var(--success-soft); color: var(--success); }
+
 /* ---------- Results ---------- */
 .results { margin-top: 1.5rem; display: grid; gap: 1.25rem; animation: fade .35s ease; }
 .result-hero { display: grid; grid-template-columns: 160px minmax(0, 1fr); gap: 1.5rem; align-items: center; padding: 1.5rem; border-left: 5px solid var(--border-strong); }
@@ -395,6 +407,28 @@ form[data-mode="register"] .register-only { display: block; }
 .trigger-suggestions { display: grid; gap: .6rem; margin-top: 1.25rem; }
 .trigger-alert { padding: .8rem 1rem; border-left: 4px solid var(--success); background: var(--success-soft); border-radius: 0 var(--radius-sm) var(--radius-sm) 0; font-size: .88rem; }
 .form-actions { display: flex; justify-content: flex-end; margin-top: 1rem; }
+
+/* ---------- Care team, lesions, clinician workspace ---------- */
+.details-box { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: .75rem 1rem; background: var(--surface-2); }
+.details-box summary { cursor: pointer; font-weight: 600; font-size: .9rem; }
+.details-box[open] summary { margin-bottom: .5rem; }
+.details-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 1rem; margin-top: .75rem; }
+.history-tabs { max-width: 380px; margin: 0 0 1.25rem; }
+.share-list, .audit-list { display: grid; gap: .5rem; margin-top: 1rem; }
+.share-item, .audit-item { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: .6rem .85rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-2); font-size: .86rem; }
+.audit-item { justify-content: flex-start; flex-wrap: wrap; gap: .5rem 1rem; }
+.audit-item .when { color: var(--faint); font-size: .78rem; margin-left: auto; }
+.review-box { margin-top: .4rem; padding: .6rem .75rem; border-left: 3px solid var(--primary); background: var(--primary-soft); border-radius: 0 var(--radius-sm) var(--radius-sm) 0; font-size: .82rem; }
+.review-box strong { display: block; }
+.input-sm { padding: .35rem .55rem; font-size: .8rem; }
+.lesion-compare { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; margin: 1rem 0; }
+.lesion-compare figure { margin: 0; }
+.lesion-compare img { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--neutral-soft); }
+.lesion-compare figcaption { font-size: .78rem; color: var(--faint); margin-top: .3rem; }
+.patient-scan-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 1rem; margin-top: 1rem; }
+.review-form { display: grid; gap: .5rem; margin-top: .6rem; }
+.review-form textarea { min-height: 60px; resize: vertical; }
+@media (max-width: 560px) { .details-grid, .lesion-compare { grid-template-columns: 1fr; } }
 
 /* ---------- Toasts / dialog ---------- */
 .toasts { position: fixed; right: 1rem; bottom: 1rem; z-index: 100; display: grid; gap: .6rem; width: min(380px, calc(100vw - 2rem)); }

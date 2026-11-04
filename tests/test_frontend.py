@@ -40,12 +40,13 @@ def test_icons_used_in_markup_and_script_are_defined_in_the_sprite():
 
 def test_all_innerhtml_values_are_escaped_or_static():
     """Every ${...} interpolated into an innerHTML template must be esc()-wrapped, an icon/constant, or numeric-safe."""
-    safe = ("esc(", "icon(", "file", "directionsUrl(", "r.tone", "ic)", "tone", "(item.image_url ?", "item.image_url ?")
+    safe = ("esc(", "icon(", "file", "directionsUrl(", "r.tone", "ic)", "tone", "(item.image_url ?", "item.image_url ?", "sc.image_url ?")
     offenders = []
     for m in re.finditer(r"innerHTML\s*=\s*(`[^`]*`)", JS, re.S):
         for expr in re.findall(r"\$\{([^}]*)\}", m.group(1)):
             e = expr.strip()
-            if not e.startswith(safe) and "esc(" not in e and not re.fullmatch(r"[a-zA-Z_.]*(tone)", e):
+            literal_choice = re.fullmatch(r".+\?\s*'[^'$`]*'\s*:\s*'[^'$`]*'", e)   # cond ? 'text' : 'text'
+            if not e.startswith(safe) and "esc(" not in e and not literal_choice and not re.fullmatch(r"[a-zA-Z_.]*(tone)", e):
                 offenders.append(e)
     assert not offenders, offenders
 

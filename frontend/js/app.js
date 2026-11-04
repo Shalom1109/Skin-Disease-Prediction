@@ -227,7 +227,7 @@ function checkAuth() {
 /* ==========================================================================
    Navigation
    ========================================================================== */
-const TITLES = { dashboard: 'Analysis', progress: 'History', clinics: 'Find a dermatologist', advice: 'Skin profile' };
+const TITLES = { dashboard: 'Analysis', progress: 'History', clinics: 'Find a dermatologist', advice: 'Skin profile', patients: 'Patients' };
 
 function closeNav() { document.body.classList.remove('nav-open'); }
 function showSection(id) {
@@ -241,6 +241,8 @@ function showSection(id) {
     closeNav();
     window.scrollTo({ top: 0 });
     if (id === 'clinics') initMap();
+    if (id === 'patients') loadPatients();
+    if (id === 'advice') loadCare();
 }
 window.showSection = showSection;
 
@@ -292,6 +294,10 @@ function renderProfile() {
     const name = userProfile.username || 'Signed in';
     $('userName').textContent = name;
     $('userAvatar').textContent = (name[0] || 'U').toUpperCase();
+    const isClinician = userProfile.role === 'clinician';
+    $('nav-patients').classList.toggle('hidden', !isClinician);
+    $('userRole').textContent = isClinician ? 'Clinician account' : 'Private workspace';
+    $('careCard').classList.toggle('hidden', isClinician);
 
     const box = $('currentSkinTypeText');
     if (userProfile.skin_type) {
@@ -353,6 +359,7 @@ async function loadHistory() {
         $('kpiScans').textContent = history.length;
         $('kpiLast').textContent = history.length ? new Date(history[0].timestamp).toLocaleDateString([], { dateStyle: 'medium' }) : '-';
         $('kpiResult').textContent = history.length ? shortResult(history[0].prediction) : '-';
+        loadLesions();
     } catch (e) { /* handled */ }
 }
 
@@ -383,6 +390,10 @@ function renderTimeline(history) {
             </div>`;
         root.appendChild(card);
         card.querySelector('.history-delete').onclick = () => deleteHistoryItem(item.id);
+        const bodyEl = card.querySelector('.scan-body');
+        const rb = reviewBlock(item.reviews);
+        if (rb) bodyEl.appendChild(rb);
+        bodyEl.appendChild(lesionAssign(item));
         const img = card.querySelector('img');
         if (img) loadProtectedImage(img, item.image_url);
     });
@@ -454,6 +465,24 @@ function setFile(file) {
     $('imagePreviewContainer').classList.remove('hidden');
     $('results').classList.add('hidden');
     setStep('analyze');
+    checkPhotoQuality(file);
+}
+
+/** Instant, model-free feedback ("too blurry", "too dark"...) before the user spends an analysis on a bad photo. */
+async function checkPhotoQuality(file) {
+    const note = $('qualityNote');
+    note.classList.add('hidden');
+    try {
+        const body = new FormData();
+        body.append('file', file);
+        const res = await api('/quality', { method: 'POST', body });
+        if (!res.ok || currentFile !== file) return;
+        const q = await res.json();
+        note.classList.toggle('warn', !q.ok);
+        $('qualityIcon').firstElementChild.setAttribute('href', q.ok ? '#i-check' : '#i-camera');
+        $('qualityText').textContent = q.ok ? 'Photo quality looks good.' : q.tips.join(' ');
+        note.classList.remove('hidden');
+    } catch (e) { /* quality hints are optional */ }
 }
 
 function resetAnalysis() {
@@ -461,6 +490,7 @@ function resetAnalysis() {
     $('fileInput').value = '';
     $('imagePreview').removeAttribute('src');
     $('imagePreviewContainer').classList.add('hidden');
+    $('qualityNote').classList.add('hidden');
     $('uploadBox').classList.remove('hidden');
     $('results').classList.add('hidden');
     setStep('upload');
@@ -485,6 +515,11 @@ $('analyzeBtn').onclick = async () => {
     const body = new FormData();
     body.append('file', currentFile);
     try {
+        const lesionId = await resolveLesionChoice();
+        if (lesionId) body.append('lesion_id', lesionId);
+        if ($('ctxAge').value) body.append('age', $('ctxAge').value);
+        if ($('ctxSex').value) body.append('sex', $('ctxSex').value);
+        if ($('ctxSite').value) body.append('site', $('ctxSite').value);
         const res = await api('/predict', { method: 'POST', body });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(detailOf(data, 'The analysis failed. Please try another image.'));
@@ -519,6 +554,17 @@ function displayResults(data) {
     $('resultImage').src = previewUrl || '';
     $('descriptionText').textContent = data.description || '';
     $('resultDisclaimer').textContent = data.disclaimer || '';
+
+    const ref = data.referral || {};
+    $('referralCard').dataset.level = ref.level || 'routine';
+    $('referralTitle').textContent = ref.title || '';
+    $('referralMessage').textContent = ref.message || '';
+    $('referralTime').textContent = ref.timeframe || '';
+    $('referralTime').dataset.tone = { priority: 'high', soon: 'medium', routine: 'low' }[ref.level] || '';
+    $('referralAdvice').textContent = ref.advice || '';
+    const q = data.quality;
+    $('resultQuality').classList.toggle('hidden', !(q && !q.ok));
+    $('resultQualityText').textContent = q && !q.ok ? q.tips.join(' ') : '';
 
     $('resultNote').classList.toggle('hidden', !data.note);
     $('resultNoteText').textContent = data.note || '';
@@ -776,6 +822,315 @@ async function sendChat(message) {
 }
 $('chatForm').onsubmit = (e) => { e.preventDefault(); sendChat($('chatInput').value); };
 $$('#chatChips .chip').forEach(chip => chip.onclick = () => sendChat(chip.textContent));
+
+/* ==========================================================================
+   Care team: tracked spots (lesions), sharing, access log, clinician workspace
+   ========================================================================== */
+const BODY_SITES = ['abdomen', 'acral', 'back', 'chest', 'ear', 'face', 'foot', 'genital', 'hand',
+                    'lower extremity', 'neck', 'scalp', 'trunk', 'upper extremity', 'unknown'];
+const REVIEW_LABELS = ['Actinic Keratoses', 'Basal Cell Carcinoma', 'Benign Keratosis', 'Dermatofibroma',
+                       'Melanoma', 'Nevi', 'Vascular', 'Other / not a skin lesion'];
+let lesionsCache = [];
+
+function el(tag, className, text) {
+    const node = document.createElement(tag);
+    if (className) node.className = className;
+    if (text !== undefined) node.textContent = text;
+    return node;
+}
+function addOptions(select, options) {
+    select.innerHTML = '';
+    options.forEach(([value, label]) => { const o = el('option', '', label); o.value = value; select.appendChild(o); });
+}
+const fmtDate = (ts) => new Date(ts).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
+
+/* ----- optional details on the analysis page ----- */
+addOptions($('ctxSite'), [['', 'Not specified'], ...BODY_SITES.map(x => [x, x])]);
+
+function renderLesionPicker() {
+    const sel = $('ctxLesion');
+    const keep = sel.value;
+    addOptions(sel, [['', 'Not tracked'], ...lesionsCache.map(l => [String(l.id), l.name]), ['new', '+ New spot...']]);
+    if ([...sel.options].some(o => o.value === keep)) sel.value = keep;
+}
+$('ctxLesion').onchange = () => $('ctxNewLesionWrap').classList.toggle('hidden', $('ctxLesion').value !== 'new');
+
+async function resolveLesionChoice() {
+    const choice = $('ctxLesion').value;
+    if (choice !== 'new') return choice || null;
+    const name = $('ctxNewLesion').value.trim();
+    if (!name) throw new Error('Enter a name for the new spot, or choose "Not tracked".');
+    const res = await api('/lesions', { method: 'POST', json: { name, body_site: $('ctxSite').value || null } });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(detailOf(data, 'Could not create the spot.'));
+    await loadLesions();
+    $('ctxLesion').value = String(data.id);
+    $('ctxNewLesionWrap').classList.add('hidden');
+    $('ctxNewLesion').value = '';
+    return data.id;
+}
+
+/* ----- history: reviews + assigning scans to a spot ----- */
+function reviewBlock(reviews) {
+    if (!reviews || !reviews.length) return null;
+    const box = el('div', 'review-box');
+    reviews.forEach(r => {
+        box.appendChild(el('strong', '', `Reviewed by ${r.clinician}: ${r.label}`));
+        if (r.note) box.appendChild(el('span', '', r.note));
+    });
+    return box;
+}
+
+function lesionAssign(item) {
+    const wrap = el('div', 'field');
+    wrap.style.margin = '.5rem 0 0';
+    const sel = el('select', 'input input-sm');
+    sel.setAttribute('aria-label', 'Tracked spot for this scan');
+    addOptions(sel, [['', 'Not tracked'], ...lesionsCache.map(l => [String(l.id), l.name])]);
+    sel.value = item.lesion_id ? String(item.lesion_id) : '';
+    sel.onchange = async () => {
+        const res = await api(`/history/${item.id}/lesion`, { method: 'POST', json: { lesion_id: sel.value ? Number(sel.value) : null } });
+        if (res.ok) { toast('Saved.', 'success', 2000); loadLesions(); } else toast('Could not update the scan.', 'error');
+    };
+    wrap.appendChild(sel);
+    return wrap;
+}
+
+/* ----- tracked spots ----- */
+async function loadLesions() {
+    try {
+        const res = await api('/lesions');
+        if (!res.ok) return;
+        lesionsCache = await res.json();
+        renderLesionPicker();
+        renderLesionList();
+    } catch (e) { /* handled */ }
+}
+
+function setHistoryTab(tab) {
+    const lesions = tab === 'lesions';
+    $('histTabScans').setAttribute('aria-selected', String(!lesions));
+    $('histTabLesions').setAttribute('aria-selected', String(lesions));
+    $('progressTimeline').classList.toggle('hidden', lesions);
+    $('lesionList').classList.toggle('hidden', !lesions);
+    $('lesionDetail').classList.add('hidden');
+}
+$('histTabScans').onclick = () => setHistoryTab('scans');
+$('histTabLesions').onclick = () => setHistoryTab('lesions');
+
+function renderLesionList() {
+    const root = $('lesionList');
+    root.innerHTML = '';
+    if (!lesionsCache.length) {
+        root.innerHTML = `<div class="empty card"><span class="card-icon">${icon('pin', 'i-lg')}</span>
+            <h3>No tracked spots yet</h3><p>When you analyse a photo, open "Add details" and choose "+ New spot" to follow it over time.</p></div>`;
+        return;
+    }
+    lesionsCache.forEach(l => {
+        const alert = l.change && l.change.alert;
+        const card = el('article', 'card');
+        card.innerHTML = `<div class="card-head"><div><h3>${esc(l.name)}</h3><p>${esc(l.body_site || 'No body site')} &middot; ${esc(l.n_scans)} scan${l.n_scans === 1 ? '' : 's'}</p></div>
+            <span class="badge" data-tone="${alert ? 'high' : 'low'}">${alert ? 'Needs attention' : 'No flag'}</span></div>
+            <p class="fine">${l.last_scan ? 'Last scan ' + esc(fmtDate(l.last_scan)) : 'No scans yet'}</p>
+            <button class="btn btn-secondary btn-sm" type="button" style="margin-top:.75rem">Open timeline</button>`;
+        card.querySelector('button').onclick = () => openLesion(l.id);
+        root.appendChild(card);
+    });
+}
+
+async function openLesion(id) {
+    const res = await api(`/lesions/${id}`);
+    if (!res.ok) return toast('Could not open that spot.', 'error');
+    const l = await res.json();
+    const box = $('lesionDetail');
+    $('lesionList').classList.add('hidden');
+    box.classList.remove('hidden');
+    box.innerHTML = '';
+
+    const head = el('div', 'card');
+    head.innerHTML = `<div class="card-head"><div><h2>${esc(l.name)}</h2><p>${esc(l.body_site || 'No body site')} &middot; ${esc(l.n_scans)} scan${l.n_scans === 1 ? '' : 's'}</p></div>
+        <div style="display:flex;gap:.5rem"><button class="btn btn-secondary btn-sm" data-act="back" type="button">Back</button>
+        <button class="btn btn-danger-ghost btn-sm" data-act="delete" type="button">${icon('trash')}Stop tracking</button></div></div>`;
+    box.appendChild(head);
+
+    if (l.change) {
+        const d = l.change.melanoma_prob_delta;
+        const text = d === null ? 'Not enough data to compare.'
+            : `Melanoma probability moved ${d >= 0 ? 'up' : 'down'} by ${Math.abs(d)} percentage points over ${l.change.days} day${l.change.days === 1 ? '' : 's'} (${l.change.first_prediction} to ${l.change.last_prediction}).`;
+        const callout = el('div', 'callout' + (l.change.alert ? ' warn' : ''));
+        callout.appendChild(el('span', '', ''));
+        const msg = el('div', '', (l.change.alert ? 'Worth showing to a doctor. ' : '') + text + ' ' + l.note);
+        callout.appendChild(msg);
+        callout.style.marginTop = '1rem';
+        head.appendChild(callout);
+    }
+
+    const scans = l.scans || [];
+    if (scans.length >= 2) {
+        const cmp = el('div', 'lesion-compare');
+        [['First photo', scans[0]], ['Latest photo', scans[scans.length - 1]]].forEach(([cap, sc]) => {
+            const fig = el('figure');
+            const img = el('img');
+            img.alt = cap;
+            if (sc.image_url) loadProtectedImage(img, sc.image_url);
+            fig.appendChild(img);
+            fig.appendChild(el('figcaption', '', `${cap} - ${fmtDate(sc.timestamp)} - ${sc.prediction}`));
+            cmp.appendChild(fig);
+        });
+        head.appendChild(cmp);
+    }
+
+    const list = el('div', 'timeline');
+    list.style.marginTop = '1rem';
+    scans.slice().reverse().forEach(sc => {
+        const r = classify(sc.prediction);
+        const card = el('article', 'card');
+        card.innerHTML = `<span class="badge" data-tone="${r.tone}">${esc(r.label)}</span><h4 style="margin-top:.5rem">${esc(sc.prediction)}</h4>
+            <p class="fine">${esc(fmtDate(sc.timestamp))} &middot; ${esc(sc.confidence)}% &middot; melanoma ${esc(sc.melanoma_prob ?? '-')}%</p>`;
+        const rb = reviewBlock(sc.reviews);
+        if (rb) card.appendChild(rb);
+        list.appendChild(card);
+    });
+    box.appendChild(list);
+
+    head.querySelector('[data-act="back"]').onclick = () => { box.classList.add('hidden'); $('lesionList').classList.remove('hidden'); };
+    head.querySelector('[data-act="delete"]').onclick = async () => {
+        const { ok } = await askDialog({ title: 'Stop tracking this spot?', message: 'Its scans stay in your history; only the grouping is removed.', confirmText: 'Stop tracking', danger: true });
+        if (!ok) return;
+        const r = await api(`/lesions/${id}`, { method: 'DELETE' });
+        if (r.ok) { toast('Spot removed.', 'success'); box.classList.add('hidden'); loadHistory(); setHistoryTab('lesions'); }
+    };
+}
+
+/* ----- care team (patient): sharing + access log ----- */
+async function loadCare() {
+    if (userProfile.role === 'clinician') return;
+    try {
+        const res = await api('/sharing');
+        if (!res.ok) return;
+        const shares = await res.json();
+        const list = $('shareList');
+        list.innerHTML = '';
+        shares.forEach(sh => {
+            const li = el('li', 'share-item');
+            li.appendChild(el('span', '', `${sh.clinician} can view your scans (since ${new Date(sh.created).toLocaleDateString()})`));
+            const btn = el('button', 'btn btn-danger-ghost btn-sm', 'Revoke');
+            btn.type = 'button';
+            btn.onclick = async () => {
+                const r = await api(`/sharing/${sh.id}`, { method: 'DELETE' });
+                if (r.ok) { toast('Access revoked.', 'success'); loadCare(); } else toast('Could not revoke.', 'error');
+            };
+            li.appendChild(btn);
+            list.appendChild(li);
+        });
+        if (!shares.length) list.appendChild(el('li', 'fine', 'You are not sharing your scans with anyone.'));
+    } catch (e) { /* handled */ }
+}
+
+$('careShareBtn').onclick = async () => {
+    const name = $('careUsername').value.trim();
+    if (!name) return $('careUsername').focus();
+    const res = await api('/sharing', { method: 'POST', json: { clinician_username: name } });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) return toast(detailOf(data, 'Could not share.'), 'error');
+    $('careUsername').value = '';
+    toast(`Shared with ${data.clinician}.`, 'success');
+    loadCare();
+};
+
+$('auditBtn').onclick = async () => {
+    const list = $('auditList');
+    const res = await api('/audit');
+    if (!res.ok) return;
+    const rows = await res.json();
+    list.innerHTML = '';
+    const verbs = { share_granted: 'was given access', share_revoked: 'access was removed', viewed_history: 'viewed your scan list', viewed_image: 'viewed a photo', reviewed_scan: 'reviewed a scan' };
+    rows.forEach(r => {
+        const li = el('li', 'audit-item');
+        li.appendChild(el('strong', '', r.who));
+        li.appendChild(el('span', '', verbs[r.action] || r.action));
+        if (r.detail) li.appendChild(el('span', 'fine', r.detail));
+        li.appendChild(el('span', 'when', fmtDate(r.when)));
+        list.appendChild(li);
+    });
+    if (!rows.length) list.appendChild(el('li', 'fine', 'No one has accessed your data yet.'));
+    list.classList.remove('hidden');
+};
+
+/* ----- clinician workspace ----- */
+async function loadPatients() {
+    const root = $('patientList');
+    $('patientDetail').classList.add('hidden');
+    root.classList.remove('hidden');
+    root.innerHTML = '';
+    const res = await api('/clinician/patients');
+    if (res.status === 403) { root.innerHTML = '<p class="muted">This page is for clinician accounts.</p>'; return; }
+    if (!res.ok) return;
+    const patients = await res.json();
+    if (!patients.length) {
+        root.innerHTML = `<div class="empty card"><span class="card-icon">${icon('user', 'i-lg')}</span><h3>No shared patients yet</h3>
+            <p>Patients appear here after they share their scans with your username.</p></div>`;
+        return;
+    }
+    patients.forEach(p => {
+        const card = el('article', 'card');
+        card.innerHTML = `<div class="card-head"><div><h3>${esc(p.username)}</h3><p>${esc(p.n_scans)} scan${p.n_scans === 1 ? '' : 's'} &middot; shared ${esc(new Date(p.shared_since).toLocaleDateString())}</p></div>
+            <span class="badge" data-tone="${p.needs_review ? 'medium' : 'low'}">${esc(p.needs_review)} to review</span></div>
+            <p class="fine">${p.last_scan ? 'Last scan ' + esc(fmtDate(p.last_scan)) + ' - ' + esc(p.last_prediction) : 'No scans yet'}</p>
+            <button class="btn btn-secondary btn-sm" type="button" style="margin-top:.75rem">Open</button>`;
+        card.querySelector('button').onclick = () => openPatient(p.patient_id);
+        root.appendChild(card);
+    });
+}
+
+async function openPatient(pid) {
+    const res = await api(`/clinician/patients/${pid}/history`);
+    if (!res.ok) return toast('Could not open this patient (access may have been revoked).', 'error');
+    const data = await res.json();
+    const box = $('patientDetail');
+    $('patientList').classList.add('hidden');
+    box.classList.remove('hidden');
+    box.innerHTML = '';
+    const head = el('div', 'card');
+    head.innerHTML = `<div class="card-head"><div><h2>${esc(data.patient)}</h2><p>${esc(data.scans.length)} scans${data.skin_type ? ' &middot; ' + esc(data.skin_type) + ' skin' : ''}. This view is recorded in the patient's access log.</p></div>
+        <button class="btn btn-secondary btn-sm" data-act="back" type="button">Back</button></div>`;
+    box.appendChild(head);
+    const grid = el('div', 'patient-scan-grid');
+    data.scans.forEach(sc => {
+        const r = classify(sc.prediction);
+        const card = el('article', 'card scan-card');
+        card.innerHTML = `<div class="scan-img">${sc.image_url ? '<img alt="Patient photo" loading="lazy">' : icon('image', 'i-lg')}</div>
+            <div class="scan-body"><span class="badge" data-tone="${r.tone}">${esc(r.label)}</span>
+            <h4>${esc(sc.prediction)}</h4>
+            <p class="fine">${esc(fmtDate(sc.timestamp))} &middot; model ${esc(sc.confidence)}% &middot; melanoma ${esc(sc.melanoma_prob ?? '-')}%</p>
+            <p class="fine">${esc([sc.age ? sc.age + ' y' : '', sc.sex || '', sc.site || ''].filter(Boolean).join(' / ') || 'No context given')}</p></div>`;
+        const img = card.querySelector('img');
+        if (img) loadProtectedImage(img, sc.image_url);
+        const body = card.querySelector('.scan-body');
+        const rb = reviewBlock(sc.reviews);
+        if (rb) body.appendChild(rb);
+
+        const form = el('div', 'review-form');
+        const sel = el('select', 'input input-sm');
+        addOptions(sel, REVIEW_LABELS.map(x => [x, x]));
+        const mine = sc.reviews && sc.reviews.length ? sc.reviews[sc.reviews.length - 1] : null;
+        if (mine) sel.value = mine.label; else sel.value = REVIEW_LABELS.includes(sc.prediction) ? sc.prediction : 'Melanoma';
+        const note = el('textarea', 'input input-sm');
+        note.placeholder = 'Note (e.g. biopsy result) - visible to the patient';
+        note.maxLength = 1000;
+        const save = el('button', 'btn btn-primary btn-sm', mine ? 'Update review' : 'Save review');
+        save.type = 'button';
+        save.onclick = async () => {
+            const r2 = await api(`/clinician/scans/${sc.id}/review`, { method: 'POST', json: { label: sel.value, note: note.value || null } });
+            if (r2.ok) { toast('Review saved.', 'success'); openPatient(pid); } else toast(detailOf(await r2.json().catch(() => ({})), 'Could not save the review.'), 'error');
+        };
+        form.append(sel, note, save);
+        body.appendChild(form);
+        grid.appendChild(card);
+    });
+    box.appendChild(grid);
+    head.querySelector('[data-act="back"]').onclick = loadPatients;
+}
 
 /* ==========================================================================
    Boot

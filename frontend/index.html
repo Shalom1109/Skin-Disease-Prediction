@@ -143,6 +143,7 @@
             <div class="nav-label">Workspace</div>
             <a href="#dashboard" id="nav-dashboard" class="active" onclick="showSection('dashboard'); return false;"><svg class="i"><use href="#i-grid"/></svg>Analysis</a>
             <a href="#progress" id="nav-progress" onclick="showSection('progress'); return false;"><svg class="i"><use href="#i-activity"/></svg>History</a>
+            <a href="#patients" id="nav-patients" class="hidden" onclick="showSection('patients'); return false;"><svg class="i"><use href="#i-user"/></svg>Patients</a>
             <a href="#clinics" id="nav-clinics" onclick="showSection('clinics'); return false;"><svg class="i"><use href="#i-pin"/></svg>Find a dermatologist</a>
             <div class="nav-label">Personal</div>
             <a href="#advice" id="nav-advice" onclick="showSection('advice'); return false;"><svg class="i"><use href="#i-user"/></svg>Skin profile</a>
@@ -162,7 +163,7 @@
         </div>
         <div class="user-card">
             <span class="avatar" id="userAvatar">U</span>
-            <div style="min-width:0;flex:1"><strong id="userName">Signed in</strong><span>Private workspace</span></div>
+            <div style="min-width:0;flex:1"><strong id="userName">Signed in</strong><span id="userRole">Private workspace</span></div>
             <button class="btn btn-ghost btn-icon" id="logoutBtn" type="button" aria-label="Sign out" title="Sign out"><svg class="i"><use href="#i-logout"/></svg></button>
         </div>
     </aside>
@@ -224,6 +225,20 @@
                                 <span class="name" id="fileName">image.jpg</span>
                                 <span class="fine" id="fileSize"></span>
                             </div>
+                            <div class="callout hidden" id="qualityNote" role="status"><svg class="i" id="qualityIcon"><use href="#i-info"/></svg><div id="qualityText"></div></div>
+                            <details class="details-box" id="detailsBox">
+                                <summary>Add details (optional)</summary>
+                                <p class="fine">Helps you track this spot over time and gives your doctor context. None of this is required.</p>
+                                <div class="details-grid">
+                                    <div class="field"><label for="ctxAge">Age</label><input class="input" id="ctxAge" type="number" min="0" max="120" inputmode="numeric"></div>
+                                    <div class="field"><label for="ctxSex">Sex</label>
+                                        <select class="input" id="ctxSex"><option value="">Prefer not to say</option><option value="female">Female</option><option value="male">Male</option></select></div>
+                                    <div class="field"><label for="ctxSite">Body site</label><select class="input" id="ctxSite"></select></div>
+                                    <div class="field"><label for="ctxLesion">Track this spot</label><select class="input" id="ctxLesion"></select></div>
+                                    <div class="field hidden" id="ctxNewLesionWrap" style="grid-column:1/-1"><label for="ctxNewLesion">Name for the new spot</label>
+                                        <input class="input" id="ctxNewLesion" maxlength="60" placeholder="e.g. mole on left shoulder"></div>
+                                </div>
+                            </details>
                             <div class="preview-actions">
                                 <button class="btn btn-primary" id="analyzeBtn" type="button"><svg class="i"><use href="#i-activity"/></svg>Analyse image</button>
                                 <button class="btn btn-secondary" id="removeFileBtn" type="button">Choose another</button>
@@ -254,6 +269,17 @@
 
                 <!-- ---- Results ---- -->
                 <div class="results hidden" id="results" aria-live="polite">
+                    <div class="card referral" id="referralCard" data-level="routine">
+                        <span class="referral-icon"><svg class="i i-lg"><use href="#i-pin"/></svg></span>
+                        <div>
+                            <span class="eyebrow">What to do next</span>
+                            <h2 id="referralTitle">-</h2>
+                            <p class="muted" id="referralMessage"></p>
+                            <div class="referral-meta"><span class="badge" id="referralTime">-</span></div>
+                            <p class="fine" id="referralAdvice"></p>
+                            <div class="callout warn hidden" id="resultQuality"><svg class="i"><use href="#i-camera"/></svg><div id="resultQualityText"></div></div>
+                        </div>
+                    </div>
                     <div class="card result-hero" id="resultCard" data-tone="neutral">
                         <img id="resultImage" alt="Analysed lesion">
                         <div class="result-main">
@@ -314,7 +340,13 @@
                     <h1>Scan history</h1>
                     <p>Your previous analyses, stored privately. Comparing photos over time can help you notice changes to discuss with a doctor.</p>
                 </div>
+                <div class="tabs history-tabs" role="tablist" aria-label="History views">
+                    <button class="tab" role="tab" id="histTabScans" aria-selected="true" type="button">All scans</button>
+                    <button class="tab" role="tab" id="histTabLesions" aria-selected="false" type="button">Tracked spots</button>
+                </div>
                 <div id="progressTimeline" class="timeline"></div>
+                <div id="lesionList" class="timeline hidden"></div>
+                <div id="lesionDetail" class="hidden"></div>
             </section>
 
             <!-- ============ CLINICS ============ -->
@@ -413,7 +445,32 @@
                         </form>
                         <div id="triggerSuggestions" class="trigger-suggestions"></div>
                     </div>
+                    <div class="card span-2" id="careCard">
+                        <div class="card-head">
+                            <div class="title-row"><span class="card-icon"><svg class="i i-lg"><use href="#i-shield"/></svg></span>
+                                <div><h3>Care team</h3><p>Share your scans with a clinician you trust. You stay in control: revoke access at any time, and every view is logged below.</p></div></div>
+                        </div>
+                        <div class="care-row">
+                            <input class="input" id="careUsername" placeholder="Clinician's username" aria-label="Clinician username" autocomplete="off">
+                            <button class="btn btn-primary" id="careShareBtn" type="button">Share my scans</button>
+                        </div>
+                        <ul class="share-list" id="shareList"></ul>
+                        <div style="margin-top:1rem">
+                            <button class="btn btn-secondary btn-sm" id="auditBtn" type="button">Show who accessed my data</button>
+                            <ul class="audit-list hidden" id="auditList"></ul>
+                        </div>
+                    </div>
                 </div>
+            </section>
+
+            <!-- ============ PATIENTS (clinicians) ============ -->
+            <section id="section-patients" class="content-section hidden">
+                <div class="page-head">
+                    <h1>Patients</h1>
+                    <p>Patients who have chosen to share their scans with you. Every view and review is recorded in an audit log that the patient can read.</p>
+                </div>
+                <div id="patientList" class="timeline"></div>
+                <div id="patientDetail" class="hidden"></div>
             </section>
         </main>
 
