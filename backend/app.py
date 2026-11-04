@@ -1,220 +1,333 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException, Depends, status, Form
-from pydantic import BaseModel
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
-from PIL import Image
-import torch
-import torch.nn as nn
-import torchvision.transforms as transforms
-import io
-import json
-import os
 import datetime
+import io
+import logging
+import os
 import re
+import threading
+import uuid
+from contextlib import asynccontextmanager
+from pathlib import Path
+from typing import Optional
+
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile, status
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from fastapi.staticfiles import StaticFiles
 from jose import JWTError, jwt
 from passlib.context import CryptContext
+from PIL import Image, ImageOps, UnidentifiedImageError
+from pydantic import BaseModel, Field
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-# Import our custom components
-from model import get_model
+import settings
+from database import History, User, get_db, init_db
+from inference import decide, predict_probs, preprocess
 from rag import SkinSenseRAG
-from database import init_db, get_db, User, History
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
-import uuid
-import shutil
+from security import RateLimiter
 
-BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
+logging.basicConfig(level=os.environ.get("SKINSENSE_LOG", "INFO"),
+                    format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+logger = logging.getLogger("skinsense")
 
-# Auth Configuration
-SECRET_KEY = "skinsense_secret_key_change_in_production"
-ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 30
+DISCLAIMER = (
+    "SkinSense AI is an educational screening aid, not a medical device. It cannot diagnose "
+    "skin conditions and was trained on dermoscopic images (HAM10000), so results on phone "
+    "photos or darker skin tones may be unreliable. Always consult a qualified dermatologist."
+)
+SKIN_TYPES = {"", "Oily", "Dry", "Combination", "Sensitive", "Normal"}
 
 pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
+# Verifying against this when the user does not exist keeps timing similar.
+_DUMMY_HASH = pwd_context.hash("not-a-real-password")
 
-# Initialize Database
+login_limiter = RateLimiter(settings.LOGIN_MAX_FAILURES, settings.LOGIN_WINDOW_SECONDS)
+register_limiter = RateLimiter(settings.REGISTER_MAX_PER_HOUR, 3600)
+
 init_db()
+settings.UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+calibration = settings.load_calibration()
+rag = SkinSenseRAG(kb_path=settings.KB_PATH)
 
-app = FastAPI(title="SkinSense AI - Conference Version")
 
-# Enable CORS for the frontend
+# --------------------------------------------------------------------------- model
+class ModelUnavailable(RuntimeError):
+    pass
+
+
+def find_checkpoint():
+    """Prefer an explicit env var, then '*best*', then '*final*'. Training
+    checkpoints (checkpoint_latest.pth) are never picked implicitly."""
+    explicit = os.environ.get("SKINSENSE_WEIGHTS")
+    if explicit:
+        return explicit if os.path.exists(explicit) else None
+    candidates = [f for f in os.listdir(settings.BACKEND_DIR)
+                  if f.endswith(".pth") and "checkpoint" not in f.lower()]
+    for keyword in ("best", "final"):
+        for name in candidates:
+            if keyword in name.lower():
+                return str(settings.BACKEND_DIR / name)
+    return None
+
+
+class ModelStore:
+    """Lazy, thread-safe model holder so importing the app never needs weights."""
+
+    def __init__(self):
+        self._model = None
+        self._lock = threading.Lock()
+        self.checkpoint = None
+
+    @property
+    def loaded(self):
+        return self._model is not None
+
+    def get(self):
+        if self._model is None:
+            with self._lock:
+                if self._model is None:
+                    self._model = self._load()
+        return self._model
+
+    def _load(self):
+        from model import get_model
+
+        self.checkpoint = find_checkpoint()
+        if self.checkpoint is None and not settings.ALLOW_UNTRAINED:
+            raise ModelUnavailable(
+                "No trained weights found. Put skin_sense_ensemble_best.pth in backend/ "
+                "(or set SKINSENSE_WEIGHTS).")
+        logger.info("Loading model weights from %s ...", self.checkpoint or "<random init>")
+        model = get_model(num_classes=settings.NUM_CLASSES, checkpoint_path=self.checkpoint)
+        import torch
+        use_gpu = torch.cuda.is_available() and os.environ.get("SKINSENSE_DEVICE", "auto").lower() != "cpu"
+        model = model.to("cuda" if use_gpu else "cpu")
+        logger.info("Model loaded and ready for inference on %s.", "GPU" if use_gpu else "CPU")
+        return model
+
+
+model_store = ModelStore()
+
+
+@asynccontextmanager
+async def lifespan(_app):
+    try:
+        model_store.get()
+    except ModelUnavailable as exc:
+        logger.warning("%s The server will start, but /predict returns 503 until weights exist.", exc)
+    yield
+
+
+app = FastAPI(title="SkinSense AI", lifespan=lifespan)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=settings.ALLOWED_ORIGINS,
+    allow_methods=["GET", "POST", "DELETE"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 
-# Static Files Configuration
-FRONTEND_DIR = os.path.join(BACKEND_DIR, "..", "frontend")
-UPLOADS_DIR = os.path.join(BACKEND_DIR, "uploads")
-os.makedirs(UPLOADS_DIR, exist_ok=True)
 
-app.mount("/css", StaticFiles(directory=os.path.join(FRONTEND_DIR, "css")), name="css")
-app.mount("/js", StaticFiles(directory=os.path.join(FRONTEND_DIR, "js")), name="js")
-app.mount("/img", StaticFiles(directory=os.path.join(FRONTEND_DIR, "img")), name="img")
-app.mount("/uploads", StaticFiles(directory=UPLOADS_DIR), name="uploads")
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "no-referrer")
+    response.headers.setdefault("Permissions-Policy", "geolocation=(self), camera=(), microphone=()")
+    return response
 
-# Configuration
-NUM_CLASSES = 7
-CLASSES = ["Actinic Keratoses", "Basal Cell Carcinoma", "Benign Keratosis", "Dermatofibroma", "Melanoma", "Nevi", "Vascular"]
 
-# Initialize Model and RAG
-# Note: For production/inference, we use the ensemble class defined in model.py
+app.mount("/css", StaticFiles(directory=settings.FRONTEND_DIR / "css"), name="css")
+app.mount("/js", StaticFiles(directory=settings.FRONTEND_DIR / "js"), name="js")
+app.mount("/img", StaticFiles(directory=settings.FRONTEND_DIR / "img"), name="img")
+# NOTE: uploads are deliberately NOT mounted as public static files; they are
+# served per-user through GET /history/{id}/image.
 
-def find_latest_model():
-    models = [f for f in os.listdir(BACKEND_DIR) if f.endswith(".pth")]
-    if not models:
-        return None
-    
-    # Priority order for best/final models
-    priority_keywords = ["best", "final"]
-    for kw in priority_keywords:
-        for m in models:
-            if kw in m.lower():
-                return os.path.join(BACKEND_DIR, m)
-                
-    # Fallback to latest by time
-    models.sort(key=lambda x: os.path.getmtime(os.path.join(BACKEND_DIR, x)), reverse=True)
-    return os.path.join(BACKEND_DIR, models[0])
 
-print(f"Initializing SkinSense AI Ensemble with {NUM_CLASSES} classes...")
-checkpoint = find_latest_model()
-if checkpoint:
-    print(f"Loading model weights from: {checkpoint} (this may take a minute)...")
-else:
-    print("No checkpoint found. Initializing with random weights.")
-
-model = get_model(num_classes=NUM_CLASSES, checkpoint_path=checkpoint)
-print("Model loaded and ready for inference.")
-
-rag = SkinSenseRAG(kb_path=os.path.join(BACKEND_DIR, "..", "data", "knowledge_base.json"))
-
-# Image Transformation (Aligned with 384x384 high-accuracy training)
-transform = transforms.Compose([
-    transforms.Resize(384),
-    transforms.CenterCrop(384),
-    transforms.ToTensor(),
-    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-])
-
-# Security Helpers
-def verify_password(plain_password, hashed_password):
-    return pwd_context.verify(plain_password, hashed_password)
-
-def get_password_hash(password):
-    return pwd_context.hash(password)
-
+# --------------------------------------------------------------------------- auth
 def create_access_token(data: dict):
     to_encode = data.copy()
-    expire = datetime.datetime.utcnow() + datetime.timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    to_encode.update({"exp": expire})
-    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
-    return encoded_jwt
+    to_encode["exp"] = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(
+        minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    return jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
 
-async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
+
+def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
     try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        print("Token successfully decoded")
-        username: str = payload.get("sub")
-        print(f"User authenticated: {username}")
-        if username is None:
-            raise credentials_exception
+        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
     except JWTError:
         raise credentials_exception
-    
+    username = payload.get("sub")
+    if not username:
+        raise credentials_exception
     user = db.query(User).filter(User.username == username).first()
     if user is None:
         raise credentials_exception
     return user
 
+
+def client_ip(request: Request):
+    return request.client.host if request.client else "unknown"
+
+
 @app.get("/")
 def read_root():
-    return FileResponse(os.path.join(FRONTEND_DIR, "index.html"))
+    return FileResponse(settings.FRONTEND_DIR / "index.html")
+
+
+@app.get("/health")
+def health():
+    return {
+        "status": "ok",
+        "model_loaded": model_store.loaded,
+        "calibration_source": calibration.get("source"),
+    }
+
 
 @app.post("/register")
-def register(username: str = Form(...), password: str = Form(...), db: Session = Depends(get_db)):
-    # 1. Username validation (letters only)
-    if not re.match(r"^[a-zA-Z0-9_]+$", username):
-        raise HTTPException(status_code=400, detail="Username must contain letters, numbers, or underscores only.")
+def register(request: Request, username: str = Form(...), password: str = Form(...),
+             db: Session = Depends(get_db)):
+    ip = client_ip(request)
+    wait = register_limiter.retry_after(ip)
+    if wait:
+        raise HTTPException(429, "Too many registrations. Try again later.", headers={"Retry-After": str(wait)})
 
-    # 2. Password validation (lowercase, number, special character)
+    if not re.fullmatch(r"[A-Za-z0-9_]{3,32}", username):
+        raise HTTPException(400, "Username must be 3-32 characters: letters, numbers or underscores.")
+    if len(password) < settings.MIN_PASSWORD_LENGTH:
+        raise HTTPException(400, f"Password must be at least {settings.MIN_PASSWORD_LENGTH} characters.")
     if not re.search(r"[a-z]", password):
-        raise HTTPException(status_code=400, detail="Password must contain at least one lowercase letter.")
+        raise HTTPException(400, "Password must contain at least one lowercase letter.")
     if not re.search(r"\d", password):
-        raise HTTPException(status_code=400, detail="Password must contain at least one number.")
-    if not re.search(r"[@_!#$%^&*()<>?/\|}{~:]", password):
-        raise HTTPException(status_code=400, detail="Password must contain at least one special character.")
+        raise HTTPException(400, "Password must contain at least one number.")
+    if not re.search(r"[@_!#$%^&*()<>?/\\|}{~:]", password):
+        raise HTTPException(400, "Password must contain at least one special character.")
 
-    # Case-insensitive uniqueness check
-    db_user = db.query(User).filter(func.lower(User.username) == username.lower()).first()
-    if db_user:
-        raise HTTPException(status_code=400, detail="Username already registered")
-    
-    hashed_password = get_password_hash(password)
-    new_user = User(username=username, hashed_password=hashed_password)
-    db.add(new_user)
+    if db.query(User).filter(func.lower(User.username) == username.lower()).first():
+        raise HTTPException(400, "Username already registered")
+
+    register_limiter.record(ip)
+    db.add(User(username=username, hashed_password=pwd_context.hash(password)))
     db.commit()
-    db.refresh(new_user)
     return {"message": "User registered successfully"}
 
+
 @app.post("/login")
-def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
-    # Case-insensitive login check
+def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+    key = f"{client_ip(request)}:{form_data.username.lower()}"
+    wait = login_limiter.retry_after(key)
+    if wait:
+        raise HTTPException(429, "Too many failed attempts. Try again later.", headers={"Retry-After": str(wait)})
+
     user = db.query(User).filter(func.lower(User.username) == form_data.username.lower()).first()
-    
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
-        )
+    # One generic error for "no such user" and "wrong password" (no username enumeration).
+    valid = pwd_context.verify(form_data.password, user.hashed_password if user else _DUMMY_HASH)
+    if not user or not valid:
+        login_limiter.record(key)
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid username or password",
+                            headers={"WWW-Authenticate": "Bearer"})
 
-    if not verify_password(form_data.password, user.hashed_password):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect password",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    
-    access_token = create_access_token(data={"sub": user.username})
-    return {"access_token": access_token, "token_type": "bearer"}
+    login_limiter.reset(key)
+    return {"access_token": create_access_token({"sub": user.username}), "token_type": "bearer"}
 
+
+# --------------------------------------------------------------------------- info
 @app.get("/diseases")
 def get_diseases():
-    return {k: v for k, v in rag.knowledge_base.items() if k in CLASSES}
+    return {k: v for k, v in rag.knowledge_base.items() if k in settings.CLASSES}
+
 
 class ChatRequest(BaseModel):
-    message: str
-    context: str = ""
+    message: str = Field(min_length=1, max_length=settings.MAX_CHAT_MESSAGE_CHARS)
+    context: str = Field(default="", max_length=100)
+
 
 @app.post("/chat")
 def chat_endpoint(request: ChatRequest, current_user: User = Depends(get_current_user)):
-    response = rag.chat(request.message, request.context)
-    return {"response": response}
+    return {"response": rag.chat(request.message, request.context)}
+
+
+# --------------------------------------------------------------------------- history
+def _iso_utc(ts):
+    return ts.isoformat() + "Z" if ts.tzinfo is None else ts.isoformat()
+
 
 @app.get("/history")
 def get_history(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    history = db.query(History).filter(History.user_id == current_user.id).order_by(History.timestamp.desc()).all()
+    rows = (db.query(History).filter(History.user_id == current_user.id)
+            .order_by(History.timestamp.desc()).all())
     return [{
         "id": h.id,
         "prediction": h.prediction,
         "confidence": h.confidence,
-        "timestamp": h.timestamp.isoformat(),
-        "image_url": f"/uploads/{h.image_path}" if h.image_path else None
-    } for h in history]
+        "timestamp": _iso_utc(h.timestamp),
+        "image_url": f"/history/{h.id}/image" if h.image_path else None,
+    } for h in rows]
 
+
+def _upload_path(name: str) -> Optional[Path]:
+    path = (settings.UPLOADS_DIR / name).resolve()
+    return path if path.parent == settings.UPLOADS_DIR.resolve() else None
+
+
+@app.get("/history/{history_id}/image")
+def history_image(history_id: int, current_user: User = Depends(get_current_user),
+                  db: Session = Depends(get_db)):
+    row = db.query(History).filter(History.id == history_id, History.user_id == current_user.id).first()
+    path = _upload_path(row.image_path) if row and row.image_path else None
+    if path is None or not path.exists():
+        raise HTTPException(404, "Image not found")
+    return FileResponse(path, headers={"Cache-Control": "private, max-age=3600"})
+
+
+def _delete_image(name):
+    path = _upload_path(name) if name else None
+    if path and path.exists():
+        try:
+            path.unlink()
+        except OSError:
+            logger.warning("Could not delete %s", path)
+
+
+@app.delete("/history/{history_id}")
+def delete_history_item(history_id: int, current_user: User = Depends(get_current_user),
+                        db: Session = Depends(get_db)):
+    row = db.query(History).filter(History.id == history_id, History.user_id == current_user.id).first()
+    if not row:
+        raise HTTPException(404, "Not found")
+    _delete_image(row.image_path)
+    db.delete(row)
+    db.commit()
+    return {"message": "Deleted"}
+
+
+@app.delete("/account")
+def delete_account(password: str = Form(...), current_user: User = Depends(get_current_user),
+                   db: Session = Depends(get_db)):
+    """Right to erasure: removes the user, every history row and every stored image."""
+    if not pwd_context.verify(password, current_user.hashed_password):
+        raise HTTPException(401, "Incorrect password")
+    for row in current_user.history:
+        _delete_image(row.image_path)
+    db.delete(current_user)
+    db.commit()
+    return {"message": "Account and all stored data deleted"}
+
+
+# --------------------------------------------------------------------------- profile
 class ProfileUpdate(BaseModel):
-    skin_type: str = None
-    food_habits: str = None
-    products_used: str = None
+    skin_type: Optional[str] = Field(default=None, max_length=20)
+    food_habits: Optional[str] = Field(default=None, max_length=500)
+    products_used: Optional[str] = Field(default=None, max_length=500)
+
 
 @app.get("/profile")
 def get_profile(current_user: User = Depends(get_current_user)):
@@ -222,143 +335,118 @@ def get_profile(current_user: User = Depends(get_current_user)):
         "username": current_user.username,
         "skin_type": current_user.skin_type,
         "food_habits": current_user.food_habits,
-        "products_used": current_user.products_used
+        "products_used": current_user.products_used,
     }
 
+
 @app.post("/profile")
-def update_profile(profile: ProfileUpdate, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    if profile.skin_type:
-        current_user.skin_type = profile.skin_type
-    if profile.food_habits:
-        current_user.food_habits = profile.food_habits
-    if profile.products_used:
-        current_user.products_used = profile.products_used
+def update_profile(profile: ProfileUpdate, current_user: User = Depends(get_current_user),
+                   db: Session = Depends(get_db)):
+    # Only fields the client actually sent are touched, so "" can clear a value.
+    sent = profile.model_fields_set
+    if "skin_type" in sent:
+        if profile.skin_type not in SKIN_TYPES and profile.skin_type is not None:
+            raise HTTPException(400, "Invalid skin type")
+        current_user.skin_type = profile.skin_type or None
+    if "food_habits" in sent:
+        current_user.food_habits = profile.food_habits or None
+    if "products_used" in sent:
+        current_user.products_used = profile.products_used or None
     db.commit()
     return {"message": "Profile updated successfully"}
 
-def dynamic_calibrate_logits(logits):
-    """
-    Dynamically calibrates raw model logits to resolve HAM10000 dataset class-imbalance bias.
-    Achieves 100% accuracy on standard skin disease classes by matching sub-class neural signatures.
-    """
-    calibrated = logits.clone()
-    
-    actinic_raw = logits[0][0].item()
-    bcc_raw = logits[0][1].item()
-    bk_raw = logits[0][2].item()
-    df_raw = logits[0][3].item()
-    melanoma_raw = logits[0][4].item()
-    nevi_raw = logits[0][5].item()
-    vascular_raw = logits[0][6].item()
-    
-    raw_pred_idx = torch.argmax(logits, dim=1).item()
-    
-    if raw_pred_idx == 2:
-        if actinic_raw > 0.0:
-            calibrated[0][0] += 2.0
-        else:
-            calibrated[0][2] += 1.0
-            
-    elif raw_pred_idx == 5:
-        if bk_raw > 1.0:
-            calibrated[0][2] += 2.0
-        elif vascular_raw > 0.5:
-            calibrated[0][3] += 3.5
-        elif bcc_raw > 0.3:
-            calibrated[0][1] += 3.0
-        elif melanoma_raw > 0.0 and nevi_raw < 3.5:
-            calibrated[0][4] += 3.5
-            
-    return calibrated
 
-@app.post("/predict")
-async def predict(
-    file: UploadFile = File(...), 
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
+# --------------------------------------------------------------------------- predict
+UNCERTAIN_INFO = {
+    "description": "The AI could not confidently identify a recognizable skin lesion in this image. This usually happens if a non-skin image is uploaded, or if the photo is blurry or poorly lit.",
+    "symptoms": ["N/A"],
+    "recommendations": [
+        "Upload a clear, well-lit photograph focused on the skin.",
+        "If you are worried about a skin change, consult a dermatologist regardless of this result.",
+    ],
+    "dos": ["Take the photo in natural lighting.", "Keep the camera steady and focused."],
+    "donts": ["Upload pictures of pets, furniture or other objects.", "Upload blurry or very dark photos."],
+}
+
+
+def _read_image(file: UploadFile) -> Image.Image:
+    data = file.file.read(settings.MAX_UPLOAD_BYTES + 1)
+    if not data:
+        raise HTTPException(400, "Empty file")
+    if len(data) > settings.MAX_UPLOAD_BYTES:
+        raise HTTPException(413, f"Image too large (max {settings.MAX_UPLOAD_BYTES // (1024 * 1024)} MB)")
     try:
-        # Load and process image
-        img_bytes = await file.read()
-        image = Image.open(io.BytesIO(img_bytes)).convert("RGB")
-        input_tensor = transform(image).unsqueeze(0)
+        probe = Image.open(io.BytesIO(data))
+        if probe.format not in settings.ALLOWED_IMAGE_FORMATS:
+            raise HTTPException(415, "Unsupported image type. Use JPEG, PNG or WebP.")
+        if probe.width * probe.height > settings.MAX_IMAGE_PIXELS:
+            raise HTTPException(400, "Image dimensions are too large")
+        image = Image.open(io.BytesIO(data))
+        image.load()
+    except HTTPException:
+        raise
+    except (UnidentifiedImageError, Image.DecompressionBombError, OSError, ValueError):
+        raise HTTPException(400, "File is not a valid image")
+    # Apply EXIF rotation, then re-encode later: the saved copy has no EXIF/GPS data.
+    return ImageOps.exif_transpose(image).convert("RGB")
 
-        # Inference
-        with torch.no_grad():
-            output = model(input_tensor)
-            
-            # Apply dynamic calibration to correct training class-imbalance biases
-            calibrated_output = dynamic_calibrate_logits(output)
-            
-            # Apply Softmax to get probabilities (ensures confidence <= 100%)
-            probabilities = torch.nn.functional.softmax(calibrated_output, dim=1)
-            
-            # HIGH-SENSITIVITY CLINICAL SAFETY LAYER
-            # If Melanoma (Index 4) has even a 4.0% probability, we escalate it.
-            # This mathematically separates cancer/BCC from benign moles & vascular spots.
-            prob_melanoma = probabilities[0][4].item()
-            confidence, index = torch.max(probabilities, 1)
-            
-            is_escalated = False
-            if prob_melanoma > 0.04 and index.item() != 4:
-                predicted_class = "Melanoma (High-Priority Escalation)"
-                confidence_val = confidence.item()  # Preserve the model's actual high confidence
-                is_escalated = True
-            else:
-                predicted_class = CLASSES[index.item()]
-                confidence_val = confidence.item()
 
-        # Ensure confidence is strictly capped at 100.0% and rounded
-        conf_val = min(float(confidence_val) * 100, 100.0)
-        conf_val = round(conf_val, 1)
+def _store_image(image: Image.Image) -> str:
+    name = f"{uuid.uuid4().hex}.jpg"
+    stored = image.copy()
+    stored.thumbnail((settings.STORED_IMAGE_MAX_SIDE, settings.STORED_IMAGE_MAX_SIDE))
+    stored.save(settings.UPLOADS_DIR / name, "JPEG", quality=92)
+    return name
 
-        # Out-of-Distribution (OOD) Filter (Bypassed if we escalated for safety, or if confidence is high enough)
-        if conf_val < 35.0 and not is_escalated:
-            predicted_class = "Uncertain / Non-Skin Image"
-            rag_info = {
-                "description": "The AI could not confidently identify a recognizable skin lesion in this image. This usually happens if a non-skin image (like an animal or object) is uploaded, or if the photo is too blurry.",
-                "symptoms": ["N/A"],
-                "recommendations": ["Upload a clear, well-lit photograph.", "Ensure the image focuses directly on human skin.", "If this is a severe skin condition, consult a dermatologist immediately."],
-                "dos": ["Take the photo in natural lighting.", "Keep the camera steady and focused."],
-                "donts": ["Upload pictures of pets, furniture, or random objects.", "Upload blurry or extremely dark photos."]
-            }
-        else:
-            # Retrieve RAG information normally
-            rag_info = rag.retrieve_info(predicted_class)
 
-        # Save image for progress tracking
-        file_ext = os.path.splitext(file.filename)[1]
-        unique_filename = f"{uuid.uuid4()}{file_ext}"
-        file_path = os.path.join(UPLOADS_DIR, unique_filename)
-        
-        # Reset file pointer and save
-        await file.seek(0)
-        with open(file_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
+# Plain `def` (not `async def`): FastAPI runs it in a worker thread, so heavy
+# CPU-bound inference no longer blocks the event loop for other requests.
+@app.post("/predict")
+def predict(file: UploadFile = File(...), current_user: User = Depends(get_current_user),
+            db: Session = Depends(get_db)):
+    image = _read_image(file)
 
-        # Save to History
-        new_history = History(
-            prediction=predicted_class,
-            confidence=conf_val,
-            image_path=unique_filename,
-            user_id=current_user.id
-        )
-        db.add(new_history)
+    try:
+        model = model_store.get()
+    except ModelUnavailable as exc:
+        raise HTTPException(503, str(exc))
+
+    try:
+        probs = predict_probs(model, preprocess(image), calibration["temperature"])
+        result = decide(probs, settings.CLASSES, calibration, settings.MELANOMA,
+                        settings.ESCALATED_LABEL, settings.UNCERTAIN_LABEL)
+        info = UNCERTAIN_INFO if result["class_name"] is None else rag.retrieve_info(result["class_name"])
+        image_name = _store_image(image)
+        db.add(History(prediction=result["prediction"], confidence=result["confidence"],
+                       image_path=image_name, user_id=current_user.id))
         db.commit()
+    except Exception:
+        logger.exception("Prediction failed")
+        raise HTTPException(500, "Prediction failed. Please try again with a different image.")
 
-        return {
-            "prediction": predicted_class,
-            "confidence": conf_val,
-            "description": rag_info.get("description", ""),
-            "symptoms": rag_info["symptoms"],
-            "recommendations": rag_info["recommendations"],
-            "dos": rag_info["dos"],
-            "donts": rag_info["donts"]
-        }
-    except JWTError:
-        raise HTTPException(status_code=401, detail="Invalid token")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    return {
+        "prediction": result["prediction"],
+        "confidence": result["confidence"],
+        "escalated": result["escalated"],
+        "uncertain": result["uncertain"],
+        "note": result["note"],
+        "top_prediction": result["top_prediction"],
+        "melanoma_probability": result["melanoma_probability"],
+        "probabilities": result["probabilities"],
+        "description": info["description"],
+        "symptoms": info["symptoms"],
+        "recommendations": info["recommendations"],
+        "dos": info["dos"],
+        "donts": info["donts"],
+        "disclaimer": DISCLAIMER,
+    }
+
+
+@app.exception_handler(Exception)
+async def unhandled(_request: Request, exc: Exception):
+    logger.exception("Unhandled error", exc_info=exc)
+    return JSONResponse(status_code=500, content={"detail": "Internal server error"})
+
 
 if __name__ == "__main__":
     import uvicorn

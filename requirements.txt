@@ -1,0 +1,15 @@
+# Runtime dependencies for the web app (tested on Python 3.13 with torch 2.6, timm 1.0.3, FastAPI 0.135).
+fastapi>=0.110,<1
+uvicorn>=0.29,<1
+python-multipart>=0.0.9
+pydantic>=2.5,<3
+torch>=2.2,<3
+torchvision>=0.17,<1
+timm>=1.0,<2
+numpy>=1.26
+pillow>=10.3
+sqlalchemy>=2.0,<3
+passlib>=1.7.4,<2
+python-jose[cryptography]>=3.3,<4
+# Optional: only needed if you set SKINSENSE_LLM=ollama for generated chat answers
+# openai>=1.30
