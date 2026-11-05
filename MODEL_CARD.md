@@ -57,6 +57,39 @@ so any resulting optimism is small but real. HAM10000 metadata has `lesion_id` b
 same patient may appear on both sides of the split. Earlier "96%+" / "99%" claims came from a leaky random split and
 must not be quoted.
 
+## How certain are these numbers? (95 % confidence intervals)
+Lesion-level bootstrap over the 1,670 test images (`evaluate.py --bootstrap`):
+
+| Metric | Value | 95 % range |
+|---|---|---|
+| Accuracy | 80.2 % | 77.7 - 82.5 % |
+| **Balanced accuracy** | 72.7 % | **66.6 - 79.1 %** |
+| Macro-F1 | 0.670 | 0.616 - 0.715 |
+| Melanoma AUC | 0.921 | 0.899 - 0.942 |
+| Melanoma sensitivity at the safety threshold | 90.8 % | 85.4 - 95.3 % |
+| Melanoma specificity at the safety threshold | 72.9 % | 70.3 - 75.7 % |
+
+The balanced-accuracy range is wide because the rare classes have very few test images (19 dermatofibromas, 24 vascular
+lesions). Treat 72.7 % as "somewhere around 67-79 %".
+
+## Uncertainty and abstention (test split)
+Confidence (1 - top probability) is a good detector of wrong answers (AUROC 0.86). Keeping only the most certain cases:
+
+| Coverage | Accuracy on the kept cases | Melanomas still covered |
+|---|---|---|
+| 100 % | 80.2 % | 100 % |
+| 80 % | 89.2 % | **71 %** |
+| 50 % | 97.6 % | 28 % |
+
+**Abstention must never mean reassurance.** Setting aside the least-confident 20 % would defer 29 % of all melanomas, so
+uncertain cases have to be *referred to a doctor*, not dismissed. Disagreement between the three networks is a weaker
+signal (AUROC 0.72) and adds nothing beyond plain confidence.
+
+## Test-time augmentation (tested, not enabled)
+Averaging four flipped views (`evaluate.py --tta`) versus a single view, paired lesion-level bootstrap: balanced accuracy
+-0.4 to +1.5 points (not significant), macro-F1 +0.4 to +3.3, melanoma AUC +0.1 to +0.9. The gain is real but tiny and
+costs 4x the inference time (about 0.5 s to 2 s per image) plus a separate calibration, so it is off by default.
+
 ## Optional patient context (age, sex, body site)
 When the user enters any of these, `backend/fusion.json` applies a small, strongly regularised correction to the image
 model's probabilities (`backend/fusion.py`, fitted by `scripts/train_fusion.py` on the validation split only).
