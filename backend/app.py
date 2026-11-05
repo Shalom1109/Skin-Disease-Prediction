@@ -24,6 +24,7 @@ from sqlalchemy.orm import Session
 import settings
 from database import AuditLog, History, Lesion, Review, Share, User, get_db, init_db
 from inference import decide, predict_probs, preprocess, referral
+from fusion import MetadataFusion
 from quality import assess_quality
 import storage
 from care import BODY_SITES, active_share, audit, build_router, scan_dict
@@ -54,6 +55,8 @@ init_db()
 settings.UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 calibration = settings.load_calibration()
 rag = SkinSenseRAG(kb_path=settings.KB_PATH)
+# Optional: combine the image model with age/sex/body site (only if scripts/train_fusion.py showed a gain).
+fusion = MetadataFusion.load(os.environ.get("SKINSENSE_FUSION", settings.BACKEND_DIR / "fusion.json"))
 
 
 # --------------------------------------------------------------------------- model
@@ -194,6 +197,7 @@ def health():
         "status": "ok",
         "model_loaded": model_store.loaded,
         "calibration_source": calibration.get("source"),
+        "context_fusion": fusion is not None,
     }
 
 
@@ -487,7 +491,12 @@ def predict(file: UploadFile = File(...), lesion_id: Optional[int] = Form(None),
 
     try:
         probs = predict_probs(model, preprocess(image), calibration["temperature"])
-        result = decide(probs, settings.CLASSES, calibration, settings.MELANOMA,
+        cfg, context_used = calibration, False
+        if fusion is not None and MetadataFusion.has_context(age, sex, site):
+            probs = fusion.predict(probs, age, sex, site)
+            cfg = {**calibration, "melanoma_threshold": fusion.melanoma_threshold}
+            context_used = True
+        result = decide(probs, settings.CLASSES, cfg, settings.MELANOMA,
                         settings.ESCALATED_LABEL, settings.UNCERTAIN_LABEL)
         info = UNCERTAIN_INFO if result["class_name"] is None else rag.retrieve_info(result["class_name"])
         image_name = _store_image(image)
@@ -504,6 +513,7 @@ def predict(file: UploadFile = File(...), lesion_id: Optional[int] = Form(None),
 
     return {
         "scan_id": scan.id,
+        "context_used": context_used,
         "prediction": result["prediction"],
         "confidence": result["confidence"],
         "escalated": result["escalated"],
