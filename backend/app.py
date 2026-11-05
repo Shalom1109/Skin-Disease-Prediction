@@ -26,7 +26,8 @@ from database import AuditLog, History, Lesion, Review, Share, User, get_db, ini
 from inference import decide, predict_probs, preprocess, referral
 from quality import assess_quality
 import storage
-from care import BODY_SITES, build_router, scan_dict
+from care import BODY_SITES, active_share, audit, build_router, scan_dict
+from explain import ensemble_cam, overlay_png
 from rag import SkinSenseRAG
 from security import RateLimiter
 
@@ -112,6 +113,7 @@ class ModelStore:
 
 
 model_store = ModelStore()
+_cam_lock = threading.Lock()
 
 
 @asynccontextmanager
@@ -280,6 +282,68 @@ def history_image(history_id: int, current_user: User = Depends(get_current_user
     return Response(content=data, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=3600"})
 
 
+# --------------------------------------------------------------------------- heat-maps
+def _target_class(prediction: str, probs=None) -> int:
+    """Class the heat-map explains: the one that was reported to the user."""
+    if prediction.startswith("Melanoma"):
+        return settings.CLASSES.index(settings.MELANOMA)
+    if prediction in settings.CLASSES:
+        return settings.CLASSES.index(prediction)
+    return int(probs.argmax())
+
+
+def _heatmap_png(scan: History) -> bytes:
+    cache = storage.derived_name(scan.image_path, "cam")
+    cached = storage.read(cache)
+    if cached:
+        return cached
+    data = storage.read(scan.image_path)
+    if data is None:
+        raise HTTPException(404, "Image not found")
+    try:
+        model = model_store.get()
+    except ModelUnavailable as exc:
+        raise HTTPException(503, str(exc))
+    image = Image.open(io.BytesIO(data)).convert("RGB")
+    tensor = preprocess(image)
+    try:
+        probs = None if (scan.prediction.startswith("Melanoma") or scan.prediction in settings.CLASSES) \
+            else predict_probs(model, tensor, calibration["temperature"])
+        with _cam_lock:
+            cam = ensemble_cam(model, tensor, _target_class(scan.prediction, probs))
+        png = overlay_png(image, cam)
+    except Exception:
+        logger.exception("Heat-map failed")
+        raise HTTPException(500, "The heat-map could not be generated.")
+    storage.write(cache, png)
+    return png
+
+
+@app.get("/history/{history_id}/heatmap")
+def history_heatmap(history_id: int, current_user: User = Depends(get_current_user),
+                    db: Session = Depends(get_db)):
+    row = db.query(History).filter(History.id == history_id, History.user_id == current_user.id).first()
+    if not row or not row.image_path:
+        raise HTTPException(404, "Image not found")
+    return Response(content=_heatmap_png(row), media_type="image/png", headers={"Cache-Control": "private, max-age=3600"})
+
+
+@app.get("/clinician/patients/{patient_id}/history/{history_id}/heatmap")
+def clinician_heatmap(patient_id: int, history_id: int, current_user: User = Depends(get_current_user),
+                      db: Session = Depends(get_db)):
+    if current_user.role != "clinician":
+        raise HTTPException(403, "A clinician account is required")
+    if not active_share(db, patient_id, current_user.id):
+        raise HTTPException(403, "This patient has not shared their scans with you")
+    row = db.query(History).filter(History.id == history_id, History.user_id == patient_id).first()
+    if not row or not row.image_path:
+        raise HTTPException(404, "Image not found")
+    png = _heatmap_png(row)
+    audit(db, current_user, patient_id, "viewed_heatmap", f"scan {history_id}")
+    db.commit()
+    return Response(content=png, media_type="image/png", headers={"Cache-Control": "private, no-store"})
+
+
 def _delete_image(name):
     storage.delete(name, "cam")
 
@@ -427,16 +491,19 @@ def predict(file: UploadFile = File(...), lesion_id: Optional[int] = Form(None),
                         settings.ESCALATED_LABEL, settings.UNCERTAIN_LABEL)
         info = UNCERTAIN_INFO if result["class_name"] is None else rag.retrieve_info(result["class_name"])
         image_name = _store_image(image)
-        db.add(History(prediction=result["prediction"], confidence=result["confidence"],
+        scan = History(prediction=result["prediction"], confidence=result["confidence"],
                        melanoma_prob=result["melanoma_probability"], image_path=image_name,
                        user_id=current_user.id, lesion_id=lesion_id,
-                       age=age, sex=sex or None, site=site or None))
+                       age=age, sex=sex or None, site=site or None)
+        db.add(scan)
         db.commit()
+        db.refresh(scan)
     except Exception:
         logger.exception("Prediction failed")
         raise HTTPException(500, "Prediction failed. Please try again with a different image.")
 
     return {
+        "scan_id": scan.id,
         "prediction": result["prediction"],
         "confidence": result["confidence"],
         "escalated": result["escalated"],

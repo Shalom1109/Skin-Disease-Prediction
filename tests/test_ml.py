@@ -208,3 +208,70 @@ def test_collect_outputs_tta_averages_views_and_matches_forward():
     ens_tta, _, _ = M.collect_outputs(model, loader, "cpu", tta=True)
     expected = np.mean([model(v).detach().numpy() for v in (x, x.flip(-1), x.flip(-2), x.flip(-1).flip(-2))], axis=0)
     assert np.allclose(ens_tta, expected, atol=1e-5)
+
+
+# ---------------------------------------------------------------- Grad-CAM heat-maps
+def _tiny_ensemble():
+    """A miniature model with the same hook points as the real ensemble (positive weights, no biases)."""
+    import torch
+    from torch import nn
+
+    class Branch(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.stages = nn.ModuleList([nn.Conv2d(3, 4, 1, bias=False)])
+            self.fc = nn.Linear(4, 7, bias=False)
+            with torch.no_grad():
+                self.stages[-1].weight.abs_()
+                self.fc.weight.abs_()
+
+        def forward(self, x):
+            return self.fc(self.stages[-1](x).mean(dim=(2, 3)))
+
+    class Tiny(nn.Module):
+        w1, w2, w3 = 1.0, 0.0, 0.0
+
+        def __init__(self):
+            super().__init__()
+            self.convnext, self.vit, self.maxvit = Branch(), Branch(), Branch()
+
+        def forward(self, x):
+            return self.w1 * self.convnext(x) + self.w2 * self.vit(x) + self.w3 * self.maxvit(x)
+
+    torch.manual_seed(0)
+    return Tiny()
+
+
+def test_gradcam_follows_the_image_content_that_drives_the_score():
+    import torch
+    import explain
+
+    model = _tiny_ensemble()
+    layers = {"convnext": (model.convnext.stages[-1], 1.0, "conv")}
+    x = torch.zeros(1, 3, 32, 32)
+    x[:, :, :16, :16] = 1.0                       # the only "lesion" is in the top-left quadrant
+    cam = explain.ensemble_cam(model, x, target_idx=2, layers=layers)
+    assert cam.shape == (32, 32) and cam.dtype == np.float32
+    assert 0.0 <= cam.min() and cam.max() == pytest.approx(1.0)
+    top_left = cam[:16, :16].mean()
+    rest = np.concatenate([cam[:16, 16:].ravel(), cam[16:].ravel()]).mean()
+    assert top_left > 5 * rest + 1e-6, (top_left, rest)
+
+
+def test_gradcam_token_layers_are_reshaped_to_a_grid():
+    import torch
+    import explain
+    t = torch.randn(1, 1 + 16, 8)                  # class token + a 4x4 patch grid
+    grid = explain._to_grid(t, "tokens", n_prefix=1)
+    assert grid.shape == (1, 8, 4, 4)
+
+
+def test_overlay_is_a_valid_png_of_the_model_view_size():
+    import io
+    import explain
+    from PIL import Image
+    cam = np.zeros((384, 384), dtype=np.float32)
+    cam[100:200, 100:200] = 1.0
+    png = explain.overlay_png(Image.new("RGB", (640, 480), (190, 140, 120)), cam)
+    img = Image.open(io.BytesIO(png))
+    assert img.format == "PNG" and img.size == (384, 384)

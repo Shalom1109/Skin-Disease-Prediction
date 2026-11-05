@@ -394,6 +394,8 @@ function renderTimeline(history) {
         const rb = reviewBlock(item.reviews);
         if (rb) bodyEl.appendChild(rb);
         bodyEl.appendChild(lesionAssign(item));
+        const histImg = card.querySelector('img');
+        if (histImg && item.image_url) bodyEl.appendChild(focusButton(histImg, `/history/${item.id}/heatmap`));
         const img = card.querySelector('img');
         if (img) loadProtectedImage(img, item.image_url);
     });
@@ -439,6 +441,7 @@ const OK_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 let currentFile = null;
 let previewUrl = null;
 let lastResultClass = '';
+let lastScanId = null;
 
 function setStep(step) {
     const order = ['upload', 'analyze', 'review'];
@@ -552,6 +555,11 @@ function displayResults(data) {
     $('confidenceLabel').textContent = data.escalated ? 'Melanoma probability' : 'Model confidence';
     $('confidenceText').textContent = `${data.confidence}%`;
     $('resultImage').src = previewUrl || '';
+    lastScanId = data.scan_id || null;
+    $('resultImage').dataset.showing = '';
+    $('focusBtn').classList.toggle('hidden', !lastScanId);
+    $('focusNote').classList.add('hidden');
+    $('focusBtn').lastChild.textContent = 'Show model focus';
     $('descriptionText').textContent = data.description || '';
     $('resultDisclaimer').textContent = data.disclaimer || '';
 
@@ -896,6 +904,52 @@ function lesionAssign(item) {
     return wrap;
 }
 
+/* ----- "model focus" heat-maps (Grad-CAM) ----- */
+async function fetchBlobUrl(url) {
+    const res = await fetch(`${API_URL}${url}`, { headers: authHeaders() });
+    if (!res.ok) throw new Error(res.status === 503 ? 'The model is not loaded on the server.' : 'The heat-map is not available.');
+    const u = URL.createObjectURL(await res.blob());
+    blobUrls.push(u);
+    return u;
+}
+
+/** Swap an <img> between the original photo and its heat-map. `onState(showingHeatmap)` updates labels. */
+async function toggleHeatmap(img, heatUrl, onState) {
+    if (img.dataset.showing === 'heat') {
+        img.src = img.dataset.orig;
+        img.dataset.showing = '';
+        return onState(false);
+    }
+    try {
+        if (!img.dataset.heatSrc || img.dataset.heatFor !== heatUrl) {
+            img.dataset.heatSrc = await fetchBlobUrl(heatUrl);
+            img.dataset.heatFor = heatUrl;
+        }
+        if (!img.dataset.showing) img.dataset.orig = img.src;
+        img.src = img.dataset.heatSrc;
+        img.dataset.showing = 'heat';
+        onState(true);
+    } catch (err) { toast(err.message, 'error'); }
+}
+
+function focusButton(img, heatUrl) {
+    const btn = el('button', 'btn btn-ghost btn-sm');
+    btn.type = 'button';
+    btn.innerHTML = icon('eye');
+    const label = document.createTextNode('Model focus');
+    btn.appendChild(label);
+    btn.onclick = () => toggleHeatmap(img, heatUrl, (on) => { label.textContent = on ? 'Show original' : 'Model focus'; });
+    return btn;
+}
+
+$('focusBtn').onclick = () => {
+    if (!lastScanId) return;
+    toggleHeatmap($('resultImage'), `/history/${lastScanId}/heatmap`, (on) => {
+        $('focusBtn').lastChild.textContent = on ? 'Show original' : 'Show model focus';
+        $('focusNote').classList.toggle('hidden', !on);
+    });
+};
+
 /* ----- tracked spots ----- */
 async function loadLesions() {
     try {
@@ -1107,6 +1161,7 @@ async function openPatient(pid) {
         const img = card.querySelector('img');
         if (img) loadProtectedImage(img, sc.image_url);
         const body = card.querySelector('.scan-body');
+        if (img && sc.image_url) body.appendChild(focusButton(img, sc.image_url.replace(/\/image$/, '/heatmap')));
         const rb = reviewBlock(sc.reviews);
         if (rb) body.appendChild(rb);
 
