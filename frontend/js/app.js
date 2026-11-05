@@ -570,6 +570,7 @@ function displayResults(data) {
     $('referralTime').textContent = ref.timeframe || '';
     $('referralTime').dataset.tone = { priority: 'high', soon: 'medium', routine: 'low' }[ref.level] || '';
     $('referralAdvice').textContent = ref.advice || '';
+    $('contextNote').classList.toggle('hidden', !data.context_used);
     const q = data.quality;
     $('resultQuality').classList.toggle('hidden', !(q && !q.ok));
     $('resultQualityText').textContent = q && !q.ok ? q.tips.join(' ') : '';

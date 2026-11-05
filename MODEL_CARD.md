@@ -57,6 +57,24 @@ so any resulting optimism is small but real. HAM10000 metadata has `lesion_id` b
 same patient may appear on both sides of the split. Earlier "96%+" / "99%" claims came from a leaky random split and
 must not be quoted.
 
+## Optional patient context (age, sex, body site)
+When the user enters any of these, `backend/fusion.json` applies a small, strongly regularised correction to the image
+model's probabilities (`backend/fusion.py`, fitted by `scripts/train_fusion.py` on the validation split only).
+On the held-out test split, versus the image model alone (paired lesion-level bootstrap):
+
+| Metric | Image model | With context | Difference (95 % range) |
+|---|---|---|---|
+| Balanced accuracy | 72.7 % | 74.1 % | +0.4 to +2.7 points |
+| Macro-F1 | 0.670 | 0.705 | +0.017 to +0.055 |
+| Melanoma AUC | 0.921 | 0.922 | no change |
+
+It does **not** improve melanoma detection; it improves the multi-class result modestly. Two designs were rejected after
+testing: re-fitting a full classifier on the 1,669 validation images (worse than no fusion), and a correction that also
+re-weighted class frequencies (higher accuracy, but it only reflects HAM10000's 67 % nevus share and lowered balanced
+accuracy). The age/sex/site effects are learned from HAM10000's clinic population and may not transfer to others;
+using demographic inputs can also encode demographic bias, so the output is only ever shown with the same referral
+guidance as the image-only result.
+
 ## Decision rules (backend/inference.py, values in backend/calibration.json)
 1. Softmax of logits / temperature T (calibrated confidence).
 2. Melanoma escalation: if P(melanoma) >= threshold and melanoma is not the top class, the result is shown as

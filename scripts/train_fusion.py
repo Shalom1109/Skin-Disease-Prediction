@@ -25,6 +25,7 @@ from backend import metrics as M  # noqa: E402
 from backend.data_utils import find_metadata_csv, load_groups, load_or_make_splits  # noqa: E402
 from backend.fusion import build_features  # noqa: E402
 
+EXPORT_VARIANT = "offset_ctx_only"      # the honest one: context effect only, no class-frequency shift
 SITES = ["abdomen", "acral", "back", "chest", "ear", "face", "foot", "genital", "hand", "lower extremity",
          "neck", "scalp", "trunk", "unknown", "upper extremity"]
 
@@ -51,6 +52,48 @@ def full_proba(clf, X, k):
     p = np.zeros((len(X), k))
     p[:, clf.classes_] = clf.predict_proba(X)
     return p
+
+
+def fit_offset(X, base_lp, y, lam, bias=True):
+    """softmax(base_lp + X W^T + b), L2 penalty on W only. The image model is a fixed input (coefficient 1)."""
+    from scipy.optimize import minimize
+    n, f = X.shape
+    k = base_lp.shape[1]
+
+    def fun(w):
+        W, b = w[:k * f].reshape(k, f), w[k * f:]
+        z = base_lp + X @ W.T + b
+        z = z - z.max(1, keepdims=True)
+        logp = z - np.log(np.exp(z).sum(1, keepdims=True))
+        g = np.exp(logp)
+        g[np.arange(n), y] -= 1.0
+        loss = -logp[np.arange(n), y].sum() + 0.5 * lam * (W ** 2).sum()
+        gb = g.sum(0) if bias else np.zeros(k)          # bias=False: no class-frequency (prior) adjustment
+        return loss, np.concatenate([(g.T @ X + lam * W).ravel(), gb])
+
+    res = minimize(fun, np.zeros(k * f + k), jac=True, method="L-BFGS-B", options={"maxiter": 500})
+    return res.x[:k * f].reshape(k, f), res.x[k * f:]
+
+
+def offset_proba(W, b, X, base_lp):
+    z = base_lp + X @ W.T + b
+    z = z - z.max(1, keepdims=True)
+    e = np.exp(z)
+    return e / e.sum(1, keepdims=True)
+
+
+def cv_offset(X, base_lp, y, groups, lam_grid, bias=True):
+    from sklearn.model_selection import GroupKFold
+    best = None
+    for lam in lam_grid:
+        oof = np.zeros((len(X), base_lp.shape[1]))
+        for tr, te in GroupKFold(n_splits=5).split(X, y, groups):
+            W, b = fit_offset(X[tr], base_lp[tr], y[tr], lam, bias)
+            oof[te] = offset_proba(W, b, X[te], base_lp[te])
+        nll = -np.log(np.clip(oof[np.arange(len(y)), y], 1e-12, 1)).mean()
+        if best is None or nll < best[0]:
+            best = (nll, lam, oof)
+    return best
 
 
 def cv_select(X, y, groups, k, c_grid):
@@ -85,7 +128,7 @@ def paired_bootstrap(y, p_a, p_b, groups, n_boot=1000, seed=0):
 
 
 def run(outputs_path, data_dir, metadata, splits_file, seed=42, target_sensitivity=0.90,
-        c_grid=(0.01, 0.03, 0.1, 0.3, 1.0), n_boot=1000):
+        c_grid=(0.01, 0.03, 0.1, 0.3, 1.0), lam_grid=(1.0, 3.0, 10.0, 30.0, 100.0, 300.0), n_boot=1000):
     d = np.load(outputs_path)
     T = float(d["temperature"])
     splits, class_names, samples, _t, _i = load_or_make_splits(data_dir, metadata, seed, splits_file)
@@ -127,6 +170,22 @@ def run(outputs_path, data_dir, metadata, splits_file, seed=42, target_sensitivi
         results[name] = {"probs": full_proba(clf, Xt, k), "thr": thr, "C": C, "cv_balanced_accuracy": score}
         models[name] = clf
 
+    meta_v, meta_t = variants["fusion"][0][:, 7:], variants["fusion"][1][:, 7:]
+    zero_v, zero_t = np.zeros((len(val_y), 1)), np.zeros((len(test_y), 1))
+    offset_models = {}
+    center = meta_v.mean(axis=0)                     # centred so "an average patient" gets no correction
+    variants_off = {"offset_bias": (zero_v, zero_t, True, None),
+                    "offset_meta": (meta_v, meta_t, True, None),
+                    "offset_ctx_only": (meta_v - center, meta_t - center, False, center)}
+    for name, (Xv, Xt, bias, ctr) in variants_off.items():
+        nll, lam, oof = cv_offset(Xv, val_lp, val_y, val_groups, lam_grid, bias)
+        thr, _, _ = M.pick_sensitivity_threshold(oof[:, mel], val_y == mel, target_sensitivity)
+        W, b = fit_offset(Xv, val_lp, val_y, lam, bias)
+        results[name] = {"probs": offset_proba(W, b, Xt, test_lp), "thr": thr, "C": lam, "cv_nll": nll}
+        if ctr is not None:                          # absorb the centring into the intercept so the runtime needs no change
+            b = b - ctr @ W.T
+        offset_models[name] = (W, b)
+
     report = {}
     for name, r in results.items():
         rep = M.classification_report(test_y, r["probs"], class_names)
@@ -134,16 +193,18 @@ def run(outputs_path, data_dir, metadata, splits_file, seed=42, target_sensitivi
         ci = M.bootstrap_ci(test_y, r["probs"], test_groups, mel, r["thr"], n_boot=min(n_boot, 500))
         report[name] = {"C": r["C"], "melanoma_threshold": r["thr"], "metrics": rep, "ci": ci}
     deltas = {
-        "fusion_vs_base": paired_bootstrap(test_y, results["base"]["probs"], results["fusion"]["probs"], test_groups, n_boot),
-        "fusion_vs_recal": paired_bootstrap(test_y, results["recal"]["probs"], results["fusion"]["probs"], test_groups, n_boot),
+        "ctx_only_vs_base": paired_bootstrap(test_y, results["base"]["probs"], results["offset_ctx_only"]["probs"], test_groups, n_boot),
+        "offset_meta_vs_base": paired_bootstrap(test_y, results["base"]["probs"], results["offset_meta"]["probs"], test_groups, n_boot),
+        "offset_meta_vs_offset_bias": paired_bootstrap(test_y, results["offset_bias"]["probs"], results["offset_meta"]["probs"], test_groups, n_boot),
+        "offset_bias_vs_base": paired_bootstrap(test_y, results["base"]["probs"], results["offset_bias"]["probs"], test_groups, n_boot),
     }
-    clf = models["fusion"]
-    coef = np.zeros((k, clf.coef_.shape[1]))
-    intercept = np.zeros(k)
-    coef[clf.classes_], intercept[clf.classes_] = clf.coef_, clf.intercept_
-    export = {"version": 1, "classes": class_names, **spec, "C": results["fusion"]["C"],
-              "melanoma_threshold": float(results["fusion"]["thr"]), "coef": coef.tolist(), "intercept": intercept.tolist(),
-              "source": "fitted on the validation split by scripts/train_fusion.py"}
+    # export the offset model in the runtime's generic form: identity on the 7 log-probabilities + learned correction
+    export_name = EXPORT_VARIANT
+    W, b = offset_models[export_name]
+    coef = np.hstack([np.eye(k), W])
+    export = {"version": 1, "classes": class_names, **spec, "lambda": results[export_name]["C"], "variant": export_name,
+              "melanoma_threshold": float(results[export_name]["thr"]), "coef": coef.tolist(), "intercept": b.tolist(),
+              "source": "offset model fitted on the validation split by scripts/train_fusion.py"}
     return {"grouped_by_lesion": grouped, "variants": report, "deltas": deltas, "export": export,
             "n_val": int(len(val_y)), "n_test": int(len(test_y))}
 
