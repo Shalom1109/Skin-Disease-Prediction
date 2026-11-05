@@ -50,3 +50,5 @@ runs/*/*.pth
 train_log*.txt
 runs/
 backend/.image_key
+
+.env

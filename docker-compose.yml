@@ -1,0 +1,53 @@
+# SkinSense AI with PostgreSQL.   Setup: copy .env.example to .env, fill it in, put the weights in ./models, then:
+#   docker compose up -d --build
+# Add automatic HTTPS (needs a public domain in .env):   docker compose --profile https up -d
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: skinsense
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: skinsense
+    volumes:
+      - dbdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U skinsense -d skinsense"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    # no published ports: the database is only reachable from the app container
+
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      SKINSENSE_DATABASE_URL: postgresql+psycopg2://skinsense:${POSTGRES_PASSWORD}@db:5432/skinsense
+      SKINSENSE_SECRET_KEY: ${SKINSENSE_SECRET_KEY:?set SKINSENSE_SECRET_KEY in .env}
+      SKINSENSE_IMAGE_KEY: ${SKINSENSE_IMAGE_KEY:?set SKINSENSE_IMAGE_KEY in .env}
+      SKINSENSE_ORIGINS: ${SKINSENSE_ORIGINS:-http://localhost:8000}
+    volumes:
+      - ./models:/models:ro
+      - uploads:/data/uploads
+    ports:
+      - "${APP_PORT:-8000}:8000"
+
+  caddy:                       # optional reverse proxy with automatic HTTPS (profile "https")
+    image: caddy:2
+    profiles: ["https"]
+    restart: unless-stopped
+    depends_on: [app]
+    ports: ["80:80", "443:443"]
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddydata:/data
+    environment:
+      DOMAIN: ${DOMAIN:?set DOMAIN in .env to use the https profile}
+
+volumes:
+  dbdata:
+  uploads:
+  caddydata:
