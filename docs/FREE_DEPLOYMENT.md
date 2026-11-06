@@ -7,7 +7,8 @@ The cheapest way to get the **whole app** online for nothing is a **Hugging Face
 > **What I verified and what I could not.** I built the Space bundle, ran the app *from the bundle* on CPU only
 > (page, login, analysis, headers all work) and tested the weights download with a stand-in. I could **not** run the
 > Hugging Face steps themselves: there is no Hugging Face account on the development machine. The commands below follow
-> Hugging Face's documented CLI; if one differs, the Space settings pages show the same options in the browser.
+> Hugging Face's CLI; I checked the option names against the `hf` command installed on this machine (version 1.5). Older
+> versions call it `huggingface-cli` instead of `hf`. If one differs, the website offers the same actions in the browser.
 
 ## What to expect from the free tier (read this first)
 | | Reality |
@@ -23,13 +24,13 @@ The cheapest way to get the **whole app** online for nothing is a **Hugging Face
 1. Create a free account at huggingface.co.
 2. Settings -> Access Tokens -> create a **Write** token (to upload) and a separate **Read** token (the Space will use it
    to fetch your private weights). Treat both like passwords and never commit them.
-3. On your computer: `pip install -U huggingface_hub`, then `huggingface-cli login` and paste the Write token
-   (newer versions call it `hf auth login`).
+3. On your computer: `pip install -U huggingface_hub`, then `hf auth login` and paste the Write token
+   (older versions: `huggingface-cli login`).
 
 ## Step 2: Upload the model weights to a *private* model repo
 The 1.2 GB weights cannot go on GitHub (100 MB limit) and should not be public.
 ```bash
-huggingface-cli upload YOUR_USERNAME/skinsense-weights backend/skin_sense_ensemble_best.pth skin_sense_ensemble_best.pth --private
+hf upload YOUR_USERNAME/skinsense-weights backend/skin_sense_ensemble_best.pth skin_sense_ensemble_best.pth --private
 ```
 This creates the private repo `YOUR_USERNAME/skinsense-weights` and uploads the file (about 1.2 GB, so it takes a while).
 
@@ -40,7 +41,7 @@ huggingface.co -> New Space -> name `skinsense`, SDK **Docker** (template "Blank
 ## Step 4: Build the bundle and upload it
 ```bash
 python scripts/make_space.py --out dist/space
-huggingface-cli upload YOUR_USERNAME/skinsense dist/space . --repo-type=space
+hf upload YOUR_USERNAME/skinsense dist/space . --repo-type space
 ```
 `dist/space` is 5 MB: backend code, the validated calibration files, the web page and a Dockerfile. It contains **no**
 weights, keys, datasets or databases.
