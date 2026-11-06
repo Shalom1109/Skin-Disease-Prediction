@@ -35,8 +35,11 @@ hf upload YOUR_USERNAME/skinsense-weights backend/skin_sense_ensemble_best.pth s
 This creates the private repo `YOUR_USERNAME/skinsense-weights` and uploads the file (about 1.2 GB, so it takes a while).
 
 ## Step 3: Create the Space
-huggingface.co -> New Space -> name `skinsense`, SDK **Docker** (template "Blank"), hardware
-**CPU basic - 2 vCPU - 16 GB - FREE**, visibility Public.
+```bash
+hf repo create YOUR_USERNAME/skinsense --repo-type space --space-sdk docker
+```
+(or in the browser: huggingface.co -> New Space -> name `skinsense`, SDK **Docker**, template "Blank"). The default hardware
+is **CPU basic - 2 vCPU - 16 GB - FREE**; leave it. Visibility: Public (so a Vercel page can call it).
 
 ## Step 4: Build the bundle and upload it
 ```bash
