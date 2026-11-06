@@ -8,6 +8,7 @@ What is verified and what is not, so you know where to look first if something m
 | App on **PostgreSQL** | **Verified**: the full 84-test suite passes against PostgreSQL 18 |
 | `Dockerfile`, `docker-compose.yml`, `Caddyfile` | **Written but never run** (Docker is not installed on the development machine). Expect to fix small things on first build. |
 | GPU inference | Verified on an RTX 4050 (about 0.5 s per image, vs 5 s on CPU) |
+| Front end on Vercel + API elsewhere (CORS, config, offline banner) | **Verified locally** with page and API on different ports; the actual Vercel deployment depends on your account |
 
 ## 1. Secrets (do this first)
 | Variable | What it protects | How to create |
@@ -31,6 +32,37 @@ medical photos would travel unencrypted.
 
 GPU host: build with `--build-arg TORCH_INDEX=https://download.pytorch.org/whl/cu124` and run the container with the
 NVIDIA container runtime. Without a GPU the app works but takes about 5 s per image.
+
+## Vercel (front end) + a separate API host
+**Vercel cannot run this project's backend.** The API needs PyTorch (over 2 GB installed) and a 1.2 GB model file,
+while a Vercel Python function is limited to about 250 MB, has no persistent disk and short time limits. What Vercel
+*can* do is host the static front end (`frontend/`), which then talks to the API running somewhere else.
+
+| Piece | Where it runs | Status |
+|---|---|---|
+| `frontend/` (HTML, CSS, JS) | **Vercel** (free tier is fine) | Verified locally in the same split topology (page and API on different origins) |
+| API + model + database + encrypted photos | A container host with 4 GB+ RAM (Render, Railway, Fly.io, a VPS, Hugging Face Spaces Docker), or your own machine behind a tunnel for demos | `Dockerfile` written, not run (see above) |
+
+### Steps
+1. **Run the API somewhere** (section 2 above) and note its public **https** URL, e.g. `https://skinsense-api.example.com`.
+   Plain `http://` will not work from an https Vercel site (mixed content).
+2. **Import the repository in Vercel**: vercel.com/new -> import `Skin-Disease-Prediction`. `vercel.json` already sets
+   the build command and the output folder (`frontend`); leave the framework preset as "Other".
+3. **Add one environment variable** in the Vercel project: `SKINSENSE_API_URL` = the API URL from step 1. The build step
+   (`scripts/vercel_build.mjs`) writes it into `frontend/js/config.js`. Redeploy after changing it.
+4. **Allow the site on the API**: set `SKINSENSE_ORIGINS=https://<your-project>.vercel.app` (comma-separate several
+   origins) on the API host and restart it. Without this, browsers block every request (CORS).
+5. Open the Vercel URL. If the API is unreachable the page shows a banner saying so, instead of failing silently.
+
+Where the API gets its weights is up to the host: mount them as a volume (`/models`, as in `docker-compose.yml`) or bake
+them into a private image. They must never go into the public Git repository (GitHub's file limit is 100 MB, and the
+model is trained on a licensed dataset).
+
+### Demo from your own computer
+Run the API locally (`LAUNCH_SKINSENSE_AI.bat`), expose it with a tunnel such as `cloudflared tunnel --url
+http://127.0.0.1:8000`, and use the tunnel's https URL as `SKINSENSE_API_URL`. This works only while your computer is on
+and awake, and everything (including patient photos) passes through the tunnel provider, so it is for demos, not for
+real patients.
 
 ## 3. Run without Docker on PostgreSQL
 ```bash

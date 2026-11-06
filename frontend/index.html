@@ -20,6 +20,10 @@
 </head>
 <body>
 
+<div id="serverBanner" class="server-banner hidden" role="alert">
+    <svg class="i"><use href="#i-alert"/></svg><span id="serverBannerText"></span>
+</div>
+
 <!-- Icon sprite -->
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
     <symbol id="i-logo" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
@@ -524,6 +528,7 @@
 </dialog>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="js/config.js"></script>
 <script src="js/app.js?v=3"></script>
 </body>
 </html>

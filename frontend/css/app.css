@@ -430,6 +430,11 @@ form[data-mode="register"] .register-only { display: block; }
 .review-form textarea { min-height: 60px; resize: vertical; }
 @media (max-width: 560px) { .details-grid, .lesion-compare { grid-template-columns: 1fr; } }
 
+/* ---------- Server status banner ---------- */
+.server-banner { position: sticky; top: 0; z-index: 120; display: flex; align-items: center; justify-content: center; gap: .6rem;
+    padding: .65rem 1rem; background: var(--warn-soft); color: var(--warn); border-bottom: 1px solid color-mix(in srgb, var(--warn) 40%, transparent);
+    font-size: .88rem; font-weight: 600; text-align: center; }
+
 /* ---------- Toasts / dialog ---------- */
 .toasts { position: fixed; right: 1rem; bottom: 1rem; z-index: 100; display: grid; gap: .6rem; width: min(380px, calc(100vw - 2rem)); }
 .toast {

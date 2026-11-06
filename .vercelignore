@@ -1,0 +1,12 @@
+backend
+dataset
+runs
+reports
+tests
+docs
+scripts/*.py
+*.pth
+*.db
+*.pid
+*.log
+splits.json

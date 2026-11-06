@@ -6,8 +6,10 @@
    - analysis (upload/results) - care finder/map - weather - chat
    ========================================================================== */
 
-// Same-origin when served by the backend; fall back to localhost if opened from a file.
-const API_URL = location.protocol.startsWith('http') ? location.origin : 'http://127.0.0.1:8000';
+// API address: set in js/config.js (Vercel build) -> else same origin when the backend serves this page ->
+// else localhost when the file is opened directly.
+const API_URL = (window.SKINSENSE_API_URL || '').replace(/\/+$/, '')
+    || (location.protocol.startsWith('http') ? location.origin : 'http://127.0.0.1:8000');
 
 const $ = (id) => document.getElementById(id);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
@@ -1188,6 +1190,22 @@ async function openPatient(pid) {
     head.querySelector('[data-act="back"]').onclick = loadPatients;
 }
 
+/* ----- is the analysis server reachable? (matters when the front end is hosted separately, e.g. on Vercel) ----- */
+async function checkServer() {
+    const banner = $('serverBanner');
+    try {
+        const res = await fetchExternal(`${API_URL}/health`, 8000);
+        if (!res.ok) throw new Error('unhealthy');
+        const health = await res.json();
+        banner.classList.toggle('hidden', health.status === 'ok');
+    } catch (e) {
+        $('serverBannerText').textContent = window.SKINSENSE_API_URL
+            ? 'The analysis server is not reachable right now, so you cannot sign in or analyse photos yet.'
+            : 'This page is running without an analysis server, so you cannot sign in or analyse photos. The server address has not been configured.';
+        banner.classList.remove('hidden');
+    }
+}
+
 /* ==========================================================================
    Boot
    ========================================================================== */
@@ -1199,3 +1217,4 @@ try {
     if (flash) { sessionStorage.removeItem('flash'); toast(flash, 'info'); }
 } catch (e) { /* ignore */ }
 checkAuth();
+checkServer();
