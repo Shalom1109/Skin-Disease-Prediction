@@ -79,6 +79,18 @@ def find_checkpoint():
     return None
 
 
+def fetch_weights_from_hub():
+    """Free hosts (e.g. Hugging Face Spaces) cannot keep a 1.2 GB file in the Git repo, so the weights can live in a
+    private model repo instead: SKINSENSE_WEIGHTS_REPO=user/name (+ HF_TOKEN for a private repo)."""
+    repo = os.environ.get("SKINSENSE_WEIGHTS_REPO", "").strip()
+    if not repo:
+        return None
+    from huggingface_hub import hf_hub_download
+    filename = os.environ.get("SKINSENSE_WEIGHTS_FILE", "skin_sense_ensemble_best.pth")
+    logger.info("Downloading weights %s from %s ...", filename, repo)
+    return hf_hub_download(repo_id=repo, filename=filename, token=os.environ.get("HF_TOKEN") or None)
+
+
 class ModelStore:
     """Lazy, thread-safe model holder so importing the app never needs weights."""
 
@@ -101,7 +113,7 @@ class ModelStore:
     def _load(self):
         from model import get_model
 
-        self.checkpoint = find_checkpoint()
+        self.checkpoint = find_checkpoint() or fetch_weights_from_hub()
         if self.checkpoint is None and not settings.ALLOW_UNTRAINED:
             raise ModelUnavailable(
                 "No trained weights found. Put skin_sense_ensemble_best.pth in backend/ "
@@ -116,6 +128,18 @@ class ModelStore:
 
 
 model_store = ModelStore()
+
+
+def heatmaps_enabled() -> bool:
+    mode = os.environ.get("SKINSENSE_HEATMAP", "auto").strip().lower()
+    if mode in ("on", "1", "true", "yes"):
+        return True
+    if mode in ("off", "0", "false", "no"):
+        return False
+    import torch
+    # "auto": only where inference itself runs on a GPU (a CPU heat-map takes ~25 s even on a 12-core laptop)
+    return torch.cuda.is_available() and os.environ.get("SKINSENSE_DEVICE", "auto").lower() != "cpu"
+
 _cam_lock = threading.Lock()
 
 
@@ -142,7 +166,11 @@ app.add_middleware(
 async def security_headers(request: Request, call_next):
     response = await call_next(request)
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
-    response.headers.setdefault("X-Frame-Options", "DENY")
+    ancestors = os.environ.get("SKINSENSE_FRAME_ANCESTORS", "").strip()
+    if ancestors and re.fullmatch(r"[A-Za-z0-9:/.*\- ]+", ancestors):
+        response.headers.setdefault("Content-Security-Policy", f"frame-ancestors 'self' {ancestors}")
+    else:
+        response.headers.setdefault("X-Frame-Options", "DENY")
     response.headers.setdefault("Referrer-Policy", "no-referrer")
     response.headers.setdefault("Permissions-Policy", "geolocation=(self), camera=(), microphone=()")
     return response
@@ -198,6 +226,7 @@ def health():
         "model_loaded": model_store.loaded,
         "calibration_source": calibration.get("source"),
         "context_fusion": fusion is not None,
+        "heatmaps": heatmaps_enabled(),
     }
 
 
@@ -326,6 +355,8 @@ def _heatmap_png(scan: History) -> bytes:
 @app.get("/history/{history_id}/heatmap")
 def history_heatmap(history_id: int, current_user: User = Depends(get_current_user),
                     db: Session = Depends(get_db)):
+    if not heatmaps_enabled():
+        raise HTTPException(503, "Heat-maps are turned off on this server (no GPU).")
     row = db.query(History).filter(History.id == history_id, History.user_id == current_user.id).first()
     if not row or not row.image_path:
         raise HTTPException(404, "Image not found")
@@ -339,6 +370,8 @@ def clinician_heatmap(patient_id: int, history_id: int, current_user: User = Dep
         raise HTTPException(403, "A clinician account is required")
     if not active_share(db, patient_id, current_user.id):
         raise HTTPException(403, "This patient has not shared their scans with you")
+    if not heatmaps_enabled():
+        raise HTTPException(503, "Heat-maps are turned off on this server (no GPU).")
     row = db.query(History).filter(History.id == history_id, History.user_id == patient_id).first()
     if not row or not row.image_path:
         raise HTTPException(404, "Image not found")

@@ -8,6 +8,7 @@ What is verified and what is not, so you know where to look first if something m
 | App on **PostgreSQL** | **Verified**: the full test suite (84 tests at the time) passes against PostgreSQL 18 |
 | `Dockerfile`, `docker-compose.yml`, `Caddyfile` | **Written but never run** (Docker is not installed on the development machine). Expect to fix small things on first build. |
 | GPU inference | Verified on an RTX 4050 (about 0.5 s per image, vs 5 s on CPU) |
+| Free hosting on a Hugging Face Space | Bundle built and **run standalone on CPU**; the Hugging Face steps themselves are unrun (see `FREE_DEPLOYMENT.md`) |
 | Front end on Vercel + API elsewhere (CORS, config, offline banner) | **Verified locally** with page and API on different ports; the actual Vercel deployment depends on your account |
 
 ## 1. Secrets (do this first)

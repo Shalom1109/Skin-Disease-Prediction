@@ -111,6 +111,7 @@ Offline: train.py / train_kfold.py / evaluate.py share backend/data_utils.py (gr
 
 ## Deployment
 Docker + PostgreSQL + HTTPS files and a checklist of what is verified are in [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
+**Free hosting** (Hugging Face Space, with its honest limits): [docs/FREE_DEPLOYMENT.md](docs/FREE_DEPLOYMENT.md).
 
 ## License
 MIT

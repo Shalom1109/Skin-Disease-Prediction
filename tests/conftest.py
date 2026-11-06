@@ -16,6 +16,7 @@ _TMP = tempfile.mkdtemp(prefix="skinsense-tests-")
 os.environ["SKINSENSE_DB"] = os.path.join(_TMP, "test.db")
 os.environ["SKINSENSE_UPLOADS"] = os.path.join(_TMP, "uploads")
 os.environ["SKINSENSE_SECRET_KEY"] = "test-secret-key-not-for-production"
+os.environ["SKINSENSE_HEATMAP"] = "on"      # heat-map tests use a stand-in Grad-CAM, so CPU-only CI can run them
 from cryptography.fernet import Fernet  # noqa: E402
 os.environ["SKINSENSE_IMAGE_KEY"] = Fernet.generate_key().decode()
 os.environ["SKINSENSE_CALIBRATION"] = os.path.join(_TMP, "no-calibration.json")

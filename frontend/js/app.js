@@ -397,7 +397,7 @@ function renderTimeline(history) {
         if (rb) bodyEl.appendChild(rb);
         bodyEl.appendChild(lesionAssign(item));
         const histImg = card.querySelector('img');
-        if (histImg && item.image_url) bodyEl.appendChild(focusButton(histImg, `/history/${item.id}/heatmap`));
+        if (histImg && item.image_url && heatmapsAvailable) bodyEl.appendChild(focusButton(histImg, `/history/${item.id}/heatmap`));
         const img = card.querySelector('img');
         if (img) loadProtectedImage(img, item.image_url);
     });
@@ -444,6 +444,7 @@ let currentFile = null;
 let previewUrl = null;
 let lastResultClass = '';
 let lastScanId = null;
+let heatmapsAvailable = true;      // set from /health: CPU-only hosts turn heat-maps off
 
 function setStep(step) {
     const order = ['upload', 'analyze', 'review'];
@@ -559,7 +560,7 @@ function displayResults(data) {
     $('resultImage').src = previewUrl || '';
     lastScanId = data.scan_id || null;
     $('resultImage').dataset.showing = '';
-    $('focusBtn').classList.toggle('hidden', !lastScanId);
+    $('focusBtn').classList.toggle('hidden', !lastScanId || !heatmapsAvailable);
     $('focusNote').classList.add('hidden');
     $('focusBtn').lastChild.textContent = 'Show model focus';
     $('descriptionText').textContent = data.description || '';
@@ -1164,7 +1165,7 @@ async function openPatient(pid) {
         const img = card.querySelector('img');
         if (img) loadProtectedImage(img, sc.image_url);
         const body = card.querySelector('.scan-body');
-        if (img && sc.image_url) body.appendChild(focusButton(img, sc.image_url.replace(/\/image$/, '/heatmap')));
+        if (img && sc.image_url && heatmapsAvailable) body.appendChild(focusButton(img, sc.image_url.replace(/\/image$/, '/heatmap')));
         const rb = reviewBlock(sc.reviews);
         if (rb) body.appendChild(rb);
 
@@ -1197,6 +1198,7 @@ async function checkServer() {
         const res = await fetchExternal(`${API_URL}/health`, 8000);
         if (!res.ok) throw new Error('unhealthy');
         const health = await res.json();
+        heatmapsAvailable = health.heatmaps !== false;
         banner.classList.toggle('hidden', health.status === 'ok');
     } catch (e) {
         $('serverBannerText').textContent = window.SKINSENSE_API_URL
